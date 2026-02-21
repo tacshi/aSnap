@@ -30,5 +30,7 @@
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>aSnap needs screen capture access to take screenshots.</string>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>aSnap uses accessibility to detect UI element boundaries for precise region selection.</string>
 </dict>
 </plist>

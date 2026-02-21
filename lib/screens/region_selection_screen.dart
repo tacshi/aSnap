@@ -12,12 +12,18 @@ import '../widgets/magnifier_loupe.dart';
 /// that cuts through the scrim to reveal the original screenshot.
 class RegionSelectionScreen extends StatefulWidget {
   final Uint8List fullScreenBytes;
+
+  /// Pre-decoded image for instant display (no async Image.memory decode).
+  final ui.Image decodedImage;
+  final List<Rect> windowRects;
   final VoidCallback onCancel;
   final void Function(Rect selectionRect) onRegionSelected;
 
   const RegionSelectionScreen({
     super.key,
     required this.fullScreenBytes,
+    required this.decodedImage,
+    required this.windowRects,
     required this.onCancel,
     required this.onRegionSelected,
   });
@@ -28,33 +34,15 @@ class RegionSelectionScreen extends StatefulWidget {
 
 class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
   final _focusNode = FocusNode();
-  ui.Image? _decodedImage;
 
   Offset? _start;
   Offset _current = Offset.zero;
   bool _isDragging = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _decodeImage();
-  }
-
-  Future<void> _decodeImage() async {
-    final codec = await ui.instantiateImageCodec(widget.fullScreenBytes);
-    final frame = await codec.getNextFrame();
-    if (mounted) {
-      setState(() => _decodedImage = frame.image);
-    } else {
-      frame.image.dispose();
-    }
-    codec.dispose();
-  }
+  Rect? _detectedWindowRect;
 
   @override
   void dispose() {
     _focusNode.dispose();
-    _decodedImage?.dispose();
     super.dispose();
   }
 
@@ -63,11 +51,30 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
     return Rect.fromPoints(_start!, _current);
   }
 
+  /// Hit-test all element rects (windows + AX sub-elements) and return the
+  /// smallest one containing [point]. This gives granular Snipaste-style
+  /// detection of toolbars, sidebars, browser content areas, etc.
+  Rect? _hitTestElement(Offset point) {
+    Rect? best;
+    double bestArea = double.infinity;
+    for (final rect in widget.windowRects) {
+      if (rect.contains(point)) {
+        final area = rect.width * rect.height;
+        if (area < bestArea) {
+          bestArea = area;
+          best = rect;
+        }
+      }
+    }
+    return best;
+  }
+
   void _onPointerDown(PointerDownEvent event) {
     setState(() {
       _start = event.localPosition;
       _current = event.localPosition;
       _isDragging = true;
+      _detectedWindowRect = null;
     });
   }
 
@@ -91,11 +98,16 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
       );
       widget.onRegionSelected(normalized);
     } else {
-      // Selection too small — reset
-      setState(() {
-        _start = null;
-        _isDragging = false;
-      });
+      // Click (no meaningful drag) — accept detected window if any
+      final windowRect = _hitTestElement(event.localPosition);
+      if (windowRect != null) {
+        widget.onRegionSelected(windowRect);
+      } else {
+        setState(() {
+          _start = null;
+          _isDragging = false;
+        });
+      }
     }
   }
 
@@ -117,7 +129,12 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
         cursor: SystemMouseCursors.precise,
         onHover: (event) {
           if (event.localPosition == _current) return;
-          setState(() => _current = event.localPosition);
+          setState(() {
+            _current = event.localPosition;
+            if (!_isDragging) {
+              _detectedWindowRect = _hitTestElement(event.localPosition);
+            }
+          });
         },
         child: Listener(
           onPointerDown: _onPointerDown,
@@ -125,33 +142,31 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
           onPointerUp: _onPointerUp,
           child: Stack(
             children: [
-              // Background: captured screenshot (fills entire screen)
+              // Background: pre-decoded screenshot (instant, no async decode)
               Positioned.fill(
-                child: Image.memory(
-                  widget.fullScreenBytes,
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                ),
+                child: RawImage(image: widget.decodedImage, fit: BoxFit.cover),
               ),
               // Overlay: scrim + crosshair + selection cutout
               Positioned.fill(
                 child: CustomPaint(
                   painter: _SelectionPainter(
                     selectionRect: _selectionRect,
+                    detectedWindowRect: _isDragging
+                        ? null
+                        : _detectedWindowRect,
                     cursorPosition: _current,
                     isDragging: _isDragging,
                     devicePixelRatio: dpr,
                   ),
                 ),
               ),
-              // Magnifier loupe (only shown after image decode)
-              if (_decodedImage != null)
-                MagnifierLoupe(
-                  sourceImage: _decodedImage!,
-                  cursorPosition: _current,
-                  devicePixelRatio: dpr,
-                  screenSize: screenSize,
-                ),
+              // Magnifier loupe
+              MagnifierLoupe(
+                sourceImage: widget.decodedImage,
+                cursorPosition: _current,
+                devicePixelRatio: dpr,
+                screenSize: screenSize,
+              ),
             ],
           ),
         ),
@@ -162,12 +177,14 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
 
 class _SelectionPainter extends CustomPainter {
   final Rect? selectionRect;
+  final Rect? detectedWindowRect;
   final Offset cursorPosition;
   final bool isDragging;
   final double devicePixelRatio;
 
   _SelectionPainter({
     required this.selectionRect,
+    required this.detectedWindowRect,
     required this.cursorPosition,
     required this.isDragging,
     required this.devicePixelRatio,
@@ -202,8 +219,30 @@ class _SelectionPainter extends CustomPainter {
       final w = (selectionRect!.width.abs() * devicePixelRatio).round();
       final h = (selectionRect!.height.abs() * devicePixelRatio).round();
       _drawDimensionLabel(canvas, selectionRect!, '$w \u00D7 $h', size);
+    } else if (detectedWindowRect != null && !isDragging) {
+      // Window detection highlight — scrim with cutout for detected window
+      final fullPath = Path()..addRect(fullRect);
+      final windowPath = Path()..addRect(detectedWindowRect!);
+      final scrimPath = Path.combine(
+        PathOperation.difference,
+        fullPath,
+        windowPath,
+      );
+      canvas.drawPath(scrimPath, scrimPaint);
+
+      // Border around detected window
+      final borderPaint = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      canvas.drawRect(detectedWindowRect!, borderPaint);
+
+      // Dimension label for detected window
+      final w = (detectedWindowRect!.width * devicePixelRatio).round();
+      final h = (detectedWindowRect!.height * devicePixelRatio).round();
+      _drawDimensionLabel(canvas, detectedWindowRect!, '$w \u00D7 $h', size);
     } else {
-      // Full scrim when not dragging
+      // Full scrim when not dragging and no window detected
       canvas.drawRect(fullRect, scrimPaint);
     }
 
@@ -278,6 +317,7 @@ class _SelectionPainter extends CustomPainter {
   @override
   bool shouldRepaint(_SelectionPainter oldDelegate) {
     return selectionRect != oldDelegate.selectionRect ||
+        detectedWindowRect != oldDelegate.detectedWindowRect ||
         cursorPosition != oldDelegate.cursorPosition ||
         isDragging != oldDelegate.isDragging;
   }
