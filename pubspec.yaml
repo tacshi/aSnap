@@ -1,0 +1,46 @@
+name: a_snap
+description: "aSnap - A screenshot tool for macOS and Windows"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Desktop screenshot capture (full screen + region)
+  screen_capturer: ^0.2.3
+
+  # System tray / menu bar integration
+  tray_manager: ^0.5.2
+
+  # Global system-wide hotkeys
+  hotkey_manager: ^0.2.3
+
+  # Window management (hide/show, skip taskbar, always-on-top)
+  window_manager: ^0.5.1
+
+  # Screen dimensions and cursor position
+  screen_retriever: ^0.2.0
+
+  # Copy PNG images to system clipboard
+  super_clipboard: ^0.9.1
+
+  # Default save locations (Downloads, Documents)
+  path_provider: ^2.1.0
+
+  # Native save-file dialog
+  file_selector: ^1.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icons/
