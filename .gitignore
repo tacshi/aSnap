@@ -65,4 +65,16 @@ lib/generated_plugin_registrant.dart
 !**/ios/**/default.perspectivev3
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
 
+# macOS
+.DS_Store
+
+# Flutter metadata
+.metadata
+
+# Claude Code
+.claude/
+
+# IDE
+.idea/
+
 # End of https://www.toptal.com/developers/gitignore/api/flutter
