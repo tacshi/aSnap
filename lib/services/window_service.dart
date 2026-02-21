@@ -1,10 +1,10 @@
-import 'dart:ui';
-
+import 'package:flutter/services.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 class WindowService {
   static const _minPreviewSize = Size(400, 300);
+  static const _channel = MethodChannel('com.asnap/window');
 
   Future<void> ensureInitialized() async {
     await windowManager.ensureInitialized();
@@ -31,6 +31,9 @@ class WindowService {
     required int imageHeight,
   }) async {
     if (imageWidth <= 0 || imageHeight <= 0) return;
+
+    // Exit overlay mode first in case we're coming from region selection
+    await _channel.invokeMethod('exitOverlayMode');
 
     final display = await screenRetriever.getPrimaryDisplay();
     final screenSize = display.size;
@@ -80,8 +83,28 @@ class WindowService {
     await windowManager.focus();
   }
 
+  /// Show the overlay window covering the entire screen including the menu bar.
+  /// Uses a native platform channel to set a borderless window above everything.
+  Future<void> showFullScreenOverlay() async {
+    // Native call: borderless window, above menu bar, full screen frame
+    await _channel.invokeMethod('enterOverlayMode');
+  }
+
+  /// Shrink the overlay window in-place to the selection rect for preview.
+  /// Stays borderless (no corner radius) and floating above other windows.
+  Future<void> showPreviewInPlace({required Rect selectionRect}) async {
+    await _channel.invokeMethod('resizeToRect', {
+      'x': selectionRect.left,
+      'y': selectionRect.top,
+      'width': selectionRect.width,
+      'height': selectionRect.height,
+    });
+  }
+
   Future<void> hidePreview() async {
+    // Hide first to avoid flash (exitOverlayMode restores normal window briefly)
     await windowManager.hide();
+    await _channel.invokeMethod('exitOverlayMode');
     await windowManager.setAlwaysOnTop(false);
   }
 }

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
@@ -41,6 +42,8 @@ void main() async {
       onCopy: _handleCopy,
       onSave: _handleSave,
       onDiscard: _handleDiscard,
+      onRegionSelected: _handleRegionSelected,
+      onRegionCancel: _handleRegionCancel,
     ),
   );
 
@@ -104,16 +107,63 @@ Future<void> _handleFullScreenCapture() async {
 }
 
 Future<void> _handleRegionCapture() async {
-  if (_appState.status == CaptureStatus.capturing) return;
+  if (_appState.status == CaptureStatus.capturing ||
+      _appState.status == CaptureStatus.selecting) {
+    return;
+  }
   _appState.setCapturing();
   await _windowService.hidePreview();
 
-  final bytes = await _captureService.captureRegion();
+  // Capture full screen silently, then show transparent overlay immediately
+  final bytes = await _captureService.captureFullScreen();
   if (bytes != null) {
-    await _showPreviewWithImage(bytes);
+    _appState.setSelecting(bytes);
+    await _windowService.showFullScreenOverlay();
   } else {
     _appState.clear();
   }
+}
+
+Future<void> _handleRegionSelected(Rect logicalRect) async {
+  final fullScreenBytes = _appState.fullScreenBytes;
+  if (fullScreenBytes == null) {
+    _appState.clear();
+    await _windowService.hidePreview();
+    return;
+  }
+
+  // Get the device pixel ratio from the captured image vs screen
+  // The fullscreen image is in physical pixels; the selection rect is in logical pixels
+  final imgSize = await _getImageSize(fullScreenBytes);
+  final display = await ScreenRetriever.instance.getPrimaryDisplay();
+  final screenSize = display.size;
+
+  final scaleX = imgSize.width / screenSize.width;
+  final scaleY = imgSize.height / screenSize.height;
+
+  final physicalRect = Rect.fromLTRB(
+    logicalRect.left * scaleX,
+    logicalRect.top * scaleY,
+    logicalRect.right * scaleX,
+    logicalRect.bottom * scaleY,
+  );
+
+  final cropped = await _captureService.cropImage(
+    fullScreenBytes,
+    physicalRect,
+  );
+  if (cropped != null) {
+    _appState.setCapturedImage(cropped);
+    await _windowService.showPreviewInPlace(selectionRect: logicalRect);
+  } else {
+    _appState.clear();
+    await _windowService.hidePreview();
+  }
+}
+
+Future<void> _handleRegionCancel() async {
+  _appState.clear();
+  await _windowService.hidePreview();
 }
 
 Future<void> _handleCopy() async {

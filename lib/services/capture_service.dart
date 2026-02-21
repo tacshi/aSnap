@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -18,18 +19,44 @@ class CaptureService {
     return _readFile(imagePath);
   }
 
-  Future<Uint8List?> captureRegion() async {
-    if (!await _ensurePermission()) return null;
+  /// Crop a region from a full-screen PNG image.
+  /// [physicalRect] is in physical pixel coordinates.
+  Future<Uint8List?> cropImage(Uint8List pngBytes, ui.Rect physicalRect) async {
+    final codec = await ui.instantiateImageCodec(pngBytes);
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
 
-    final imagePath = await _tempImagePath();
-    final capturedData = await screenCapturer.capture(
-      mode: CaptureMode.region,
-      imagePath: imagePath,
-      copyToClipboard: false,
-      silent: true,
+    final srcRect = ui.Rect.fromLTWH(
+      physicalRect.left.clamp(0, image.width.toDouble()),
+      physicalRect.top.clamp(0, image.height.toDouble()),
+      physicalRect.width.clamp(0, image.width - physicalRect.left),
+      physicalRect.height.clamp(0, image.height - physicalRect.top),
     );
-    if (capturedData == null) return null;
-    return _readFile(imagePath);
+
+    if (srcRect.width <= 0 || srcRect.height <= 0) {
+      image.dispose();
+      codec.dispose();
+      return null;
+    }
+
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    final dstRect = ui.Rect.fromLTWH(0, 0, srcRect.width, srcRect.height);
+    canvas.drawImageRect(image, srcRect, dstRect, ui.Paint());
+    final picture = recorder.endRecording();
+
+    final cropped = await picture.toImage(
+      srcRect.width.round(),
+      srcRect.height.round(),
+    );
+    final byteData = await cropped.toByteData(format: ui.ImageByteFormat.png);
+
+    image.dispose();
+    codec.dispose();
+    picture.dispose();
+    cropped.dispose();
+
+    return byteData?.buffer.asUint8List();
   }
 
   Future<bool> checkPermission() async {

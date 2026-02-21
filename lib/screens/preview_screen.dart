@@ -26,6 +26,15 @@ class _PreviewScreenState extends State<PreviewScreen> {
   final _focusNode = FocusNode();
 
   @override
+  void initState() {
+    super.initState();
+    // Ensure focus after window transitions (overlay → preview)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+    });
+  }
+
+  @override
   void dispose() {
     _focusNode.dispose();
     super.dispose();
