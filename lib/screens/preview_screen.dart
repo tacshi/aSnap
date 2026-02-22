@@ -73,31 +73,79 @@ class _PreviewScreenState extends State<PreviewScreen> {
               widget.onDiscard();
             }
           },
-          child: DragToMoveArea(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Screenshot fills the entire window (decoded ui.Image)
-                RawImage(image: image, fit: BoxFit.contain),
-
-                // Floating toolbar at bottom center
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: PreviewToolbar(
-                      onCopy: widget.onCopy,
-                      onSave: widget.onSave,
-                      onDiscard: widget.onDiscard,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          child: widget.appState.isScrollCapture
+              ? _buildScrollPreview(image)
+              : _buildNormalPreview(image),
         );
       },
+    );
+  }
+
+  Widget _buildNormalPreview(dynamic image) {
+    return DragToMoveArea(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          RawImage(image: image, fit: BoxFit.contain),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: PreviewToolbar(
+                onCopy: widget.onCopy,
+                onSave: widget.onSave,
+                onDiscard: widget.onDiscard,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScrollPreview(dynamic image) {
+    // Scrollable layout for tall stitched images — no DragToMoveArea
+    // (conflicts with scroll gesture).
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final imageHeight =
+                  constraints.maxWidth * (image.height / image.width);
+              return SingleChildScrollView(
+                child: SizedBox(
+                  width: constraints.maxWidth,
+                  height: imageHeight,
+                  child: RawImage(image: image, fit: BoxFit.fitWidth),
+                ),
+              );
+            },
+          ),
+        ),
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.transparent, Colors.black54],
+              ),
+            ),
+            child: Center(
+              child: PreviewToolbar(
+                onCopy: widget.onCopy,
+                onSave: widget.onSave,
+                onDiscard: widget.onDiscard,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -2,7 +2,14 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
-enum CaptureStatus { idle, capturing, selecting, captured }
+enum CaptureStatus {
+  idle,
+  capturing,
+  selecting,
+  scrollWaiting,
+  scrollCapturing,
+  captured,
+}
 
 class AppState extends ChangeNotifier {
   /// Pre-decoded full-screen image for instant display in the overlay.
@@ -26,11 +33,40 @@ class AppState extends ChangeNotifier {
   Offset? _screenOrigin;
   Offset? get screenOrigin => _screenOrigin;
 
+  /// Whether the current captured image is from a scroll capture (for scrollable preview).
+  bool _isScrollCapture = false;
+  bool get isScrollCapture => _isScrollCapture;
+
+  /// CG bounds of the scroll target window (for badge placement).
+  Rect? _scrollTargetBounds;
+  Rect? get scrollTargetBounds => _scrollTargetBounds;
+
+  /// Live frame count during scroll capture (for badge).
+  int _scrollFrameCount = 0;
+  int get scrollFrameCount => _scrollFrameCount;
+
   CaptureStatus _status = CaptureStatus.idle;
   CaptureStatus get status => _status;
 
   void setCapturing() {
     _status = CaptureStatus.capturing;
+    notifyListeners();
+  }
+
+  void setScrollWaiting() {
+    _status = CaptureStatus.scrollWaiting;
+    notifyListeners();
+  }
+
+  void setScrollCapturing({required Rect targetBounds}) {
+    _scrollTargetBounds = targetBounds;
+    _scrollFrameCount = 0;
+    _status = CaptureStatus.scrollCapturing;
+    notifyListeners();
+  }
+
+  void updateScrollFrameCount(int count) {
+    _scrollFrameCount = count;
     notifyListeners();
   }
 
@@ -64,6 +100,19 @@ class AppState extends ChangeNotifier {
     _windowRects = null;
     _screenSize = null;
     _screenOrigin = null;
+    _isScrollCapture = false;
+    _status = CaptureStatus.captured;
+    notifyListeners();
+  }
+
+  void setCapturedScrollImage(Image image) {
+    _capturedImage?.dispose();
+    _capturedImage = image;
+    _decodedFullScreen?.dispose();
+    _decodedFullScreen = null;
+    _windowRects = null;
+    _scrollTargetBounds = null;
+    _isScrollCapture = true;
     _status = CaptureStatus.captured;
     notifyListeners();
   }
@@ -98,6 +147,9 @@ class AppState extends ChangeNotifier {
     _windowRects = null;
     _screenSize = null;
     _screenOrigin = null;
+    _isScrollCapture = false;
+    _scrollTargetBounds = null;
+    _scrollFrameCount = 0;
     _status = CaptureStatus.idle;
     notifyListeners();
   }

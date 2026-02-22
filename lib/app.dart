@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'screens/preview_screen.dart';
 import 'screens/region_selection_screen.dart';
 import 'state/app_state.dart';
+import 'utils/constants.dart';
+import 'widgets/scroll_progress_badge.dart';
 
 class ASnapApp extends StatelessWidget {
   final AppState appState;
@@ -12,6 +14,7 @@ class ASnapApp extends StatelessWidget {
   final void Function(Rect selectionRect) onRegionSelected;
   final VoidCallback onRegionCancel;
   final Future<Rect?> Function(Offset localPoint)? onHitTest;
+  final VoidCallback? onScrollCancel;
 
   const ASnapApp({
     super.key,
@@ -22,6 +25,7 @@ class ASnapApp extends StatelessWidget {
     required this.onRegionSelected,
     required this.onRegionCancel,
     this.onHitTest,
+    this.onScrollCancel,
   });
 
   @override
@@ -41,6 +45,13 @@ class ASnapApp extends StatelessWidget {
               onCancel: onRegionCancel,
               onRegionSelected: onRegionSelected,
               onHitTest: onHitTest,
+            );
+          }
+          if (appState.status == CaptureStatus.scrollCapturing) {
+            return ScrollProgressBadge(
+              frameCount: appState.scrollFrameCount,
+              maxFrames: kScrollMaxFrames,
+              onCancel: onScrollCancel ?? () {},
             );
           }
           return PreviewScreen(

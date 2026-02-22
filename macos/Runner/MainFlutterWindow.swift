@@ -20,6 +20,11 @@ class MainFlutterWindow: NSWindow {
   // Local Esc key monitor (catches Escape when our window is key but at alpha=0)
   private var localEscMonitor: Any?
 
+  // Scroll capture: CGEvent tap for intercepting next mouse click
+  private var clickEventTap: CFMachPort?
+  private var clickRunLoopSource: CFRunLoopSource?
+  private var clickSelfRef: Unmanaged<MainFlutterWindow>?
+
   /// Append a debug line to ~/asnap_overlay.log (debug builds only).
   private static func log(_ msg: String) {
     #if DEBUG
@@ -417,6 +422,187 @@ class MainFlutterWindow: NSWindow {
         } else {
           result(nil)
         }
+      // MARK: - Scroll capture methods
+      case "startClickMonitor":
+        self.stopClickMonitorImpl()
+        let refToSelf = Unmanaged.passRetained(self)
+        let eventMask: CGEventMask = (1 << CGEventType.leftMouseDown.rawValue)
+        guard let tap = CGEvent.tapCreate(
+          tap: .cghidEventTap,
+          place: .headInsertEventTap,
+          options: .defaultTap,
+          eventsOfInterest: eventMask,
+          callback: MainFlutterWindow.clickTapCallback,
+          userInfo: refToSelf.toOpaque()
+        ) else {
+          refToSelf.release()
+          MainFlutterWindow.log("startClickMonitor: failed to create tap")
+          result(nil)
+          return
+        }
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        self.clickEventTap = tap
+        self.clickRunLoopSource = source
+        self.clickSelfRef = refToSelf
+        MainFlutterWindow.log("startClickMonitor: installed")
+        result(nil)
+      case "stopClickMonitor":
+        self.stopClickMonitorImpl()
+        MainFlutterWindow.log("stopClickMonitor: removed")
+        result(nil)
+      case "hitTestScrollTarget":
+        guard let args = call.arguments as? [String: Double],
+              let cgX = args["x"], let cgY = args["y"] else {
+          result(nil); return
+        }
+        let point = CGPoint(x: cgX, y: cgY)
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        guard let infoList = CGWindowListCopyWindowInfo(
+          [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { result(nil); return }
+
+        for info in infoList {
+          guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+          guard let pid = info[kCGWindowOwnerPID as String] as? Int32, pid != ownPID else { continue }
+          guard let windowId = info[kCGWindowNumber as String] as? CGWindowID else { continue }
+          guard let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                let bounds = CGRect(dictionaryRepresentation: boundsDict) else { continue }
+          if bounds.contains(point) {
+            result([
+              "windowId": Int(windowId),
+              "ownerPid": Int(pid),
+              "boundsX": Double(bounds.origin.x),
+              "boundsY": Double(bounds.origin.y),
+              "boundsWidth": Double(bounds.size.width),
+              "boundsHeight": Double(bounds.size.height),
+            ])
+            return
+          }
+        }
+        result(nil)
+      case "captureWindow":
+        guard let args = call.arguments as? [String: Any],
+              let windowId = args["windowId"] as? Int else {
+          result(nil); return
+        }
+        let wid = CGWindowID(windowId)
+        // Get current window bounds
+        guard let infoList = CGWindowListCopyWindowInfo(
+          [.optionIncludingWindow], wid
+        ) as? [[String: Any]],
+              let info = infoList.first,
+              let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+              let cgBounds = CGRect(dictionaryRepresentation: boundsDict)
+        else { result(nil); return }
+
+        // Capture only this window
+        guard let img = CGWindowListCreateImage(
+          cgBounds, .optionIncludingWindow, wid, .bestResolution
+        ) else { result(nil); return }
+
+        // Convert to BGRA8888 (same pattern as captureScreen)
+        let w = img.width
+        let h = img.height
+        let bpr = w * 4
+        guard let ctx = CGContext(
+          data: nil, width: w, height: h,
+          bitsPerComponent: 8, bytesPerRow: bpr,
+          space: CGColorSpaceCreateDeviceRGB(),
+          bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                    | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { result(nil); return }
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let baseAddr = ctx.data else { result(nil); return }
+        let pixelData = Data(bytes: baseAddr, count: h * bpr)
+
+        result([
+          "bytes": FlutterStandardTypedData(bytes: pixelData),
+          "pixelWidth": w,
+          "pixelHeight": h,
+          "bytesPerRow": bpr,
+          "boundsX": Double(cgBounds.origin.x),
+          "boundsY": Double(cgBounds.origin.y),
+          "boundsWidth": Double(cgBounds.size.width),
+          "boundsHeight": Double(cgBounds.size.height),
+        ])
+      case "activateWindowById":
+        guard let args = call.arguments as? [String: Any],
+              let windowId = args["windowId"] as? Int else {
+          result(nil); return
+        }
+        let wid = CGWindowID(windowId)
+        guard let infoList = CGWindowListCopyWindowInfo(
+          [.optionIncludingWindow], wid
+        ) as? [[String: Any]],
+              let info = infoList.first,
+              let pid = info[kCGWindowOwnerPID as String] as? Int32
+        else { result(nil); return }
+
+        if let app = NSRunningApplication(processIdentifier: pid) {
+          app.activate(options: .activateIgnoringOtherApps)
+        }
+        result(nil)
+      case "scrollWindow":
+        guard let args = call.arguments as? [String: Any],
+              let windowId = args["windowId"] as? Int,
+              let deltaPixels = args["deltaPixels"] as? Double else {
+          result(nil); return
+        }
+        let wid = CGWindowID(windowId)
+        // Get window center for scroll event position
+        guard let infoList = CGWindowListCopyWindowInfo(
+          [.optionIncludingWindow], wid
+        ) as? [[String: Any]],
+              let info = infoList.first,
+              let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+              let cgBounds = CGRect(dictionaryRepresentation: boundsDict)
+        else { result(nil); return }
+
+        let center = CGPoint(x: cgBounds.midX, y: cgBounds.midY)
+        guard let scrollEvent = CGEvent(
+          scrollWheelEvent2Source: nil,
+          units: .pixel,
+          wheelCount: 1,
+          wheel1: Int32(deltaPixels),
+          wheel2: 0,
+          wheel3: 0
+        ) else { result(nil); return }
+        scrollEvent.location = center
+        scrollEvent.post(tap: .cghidEventTap)
+        result(nil)
+      case "showScrollBadge":
+        guard let args = call.arguments as? [String: Any],
+              let anchorX = args["anchorX"] as? Double,
+              let anchorY = args["anchorY"] as? Double,
+              let anchorW = args["anchorWidth"] as? Double else {
+          result(nil); return
+        }
+        let badgeW: CGFloat = 160
+        let badgeH: CGFloat = 44
+        // CG coordinates (top-left origin) → NS coordinates (bottom-left origin)
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 900
+        let nsX = CGFloat(anchorX) + CGFloat(anchorW) - badgeW
+        let nsY = primaryHeight - CGFloat(anchorY) - badgeH + 8 // 8px above window top edge in CG
+
+        // Save current style if not already saved
+        if self.savedStyleMask == nil {
+          self.savedStyleMask = self.styleMask
+        }
+        self.styleMask = [.borderless]
+        self.isOpaque = false
+        self.backgroundColor = .clear
+        self.hasShadow = true
+        self.level = .statusBar
+        self.ignoresMouseEvents = true
+        self.collectionBehavior = [.canJoinAllSpaces]
+        self.minSize = NSSize(width: 1, height: 1)
+        self.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        self.setFrame(NSRect(x: nsX, y: nsY, width: badgeW, height: badgeH), display: true)
+        self.orderFrontRegardless()
+        MainFlutterWindow.log("showScrollBadge: frame=\(NSStringFromRect(self.frame))")
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -629,6 +815,49 @@ class MainFlutterWindow: NSWindow {
         depth: depth + 1,
         maxDepth: maxDepth
       )
+    }
+  }
+
+  // MARK: - Click monitor helpers (scroll capture target selection)
+
+  /// C callback for CGEvent tap — intercepts next left click, suppresses it,
+  /// and notifies Dart with the CG coordinates.
+  private static let clickTapCallback: CGEventTapCallBack = { (proxy, type, event, userInfo) in
+    guard let userInfo = userInfo else { return Unmanaged.passUnretained(event) }
+    let window = Unmanaged<MainFlutterWindow>.fromOpaque(userInfo).takeUnretainedValue()
+
+    // System can disable taps; re-enable if that happens
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+      if let tap = window.clickEventTap {
+        CGEvent.tapEnable(tap: tap, enable: true)
+      }
+      return Unmanaged.passUnretained(event)
+    }
+
+    let point = event.location // CG coordinates (top-left origin)
+    DispatchQueue.main.async {
+      window.stopClickMonitorImpl()
+      window.flutterChannel?.invokeMethod("onScrollTargetClicked", arguments: [
+        "x": Double(point.x),
+        "y": Double(point.y),
+      ])
+    }
+    return nil // suppress the click
+  }
+
+  /// Remove the CGEvent tap and release retained self reference.
+  private func stopClickMonitorImpl() {
+    if let tap = self.clickEventTap {
+      CGEvent.tapEnable(tap: tap, enable: false)
+      if let source = self.clickRunLoopSource {
+        CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+      }
+      self.clickEventTap = nil
+      self.clickRunLoopSource = nil
+    }
+    if let ref = self.clickSelfRef {
+      ref.release()
+      self.clickSelfRef = nil
     }
   }
 

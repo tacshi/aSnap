@@ -9,6 +9,7 @@ class HotkeyService {
   Future<void> register({
     required VoidCallback onFullScreen,
     required VoidCallback onRegion,
+    required VoidCallback onScrollCapture,
   }) async {
     await hotKeyManager.unregisterAll();
     await hotKeyManager.register(
@@ -18,6 +19,10 @@ class HotkeyService {
     await hotKeyManager.register(
       kRegionHotkey,
       keyDownHandler: (_) => onRegion(),
+    );
+    await hotKeyManager.register(
+      kScrollCaptureHotkey,
+      keyDownHandler: (_) => onScrollCapture(),
     );
     _registered = true;
   }

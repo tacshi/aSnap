@@ -8,6 +8,7 @@ import '../utils/constants.dart';
 class TrayService with TrayListener {
   VoidCallback? onCaptureFullScreen;
   VoidCallback? onCaptureRegion;
+  VoidCallback? onCaptureScroll;
   VoidCallback? onQuit;
 
   Future<void> init() async {
@@ -24,6 +25,10 @@ class TrayService with TrayListener {
           key: 'capture_region',
           label: 'Region (${_shortcutLabel(kRegionHotkey)})',
         ),
+        MenuItem(
+          key: 'capture_scroll',
+          label: 'Scroll (${_shortcutLabel(kScrollCaptureHotkey)})',
+        ),
         MenuItem.separator(),
         MenuItem(key: 'quit', label: 'Quit $kAppName'),
       ],
@@ -39,6 +44,8 @@ class TrayService with TrayListener {
         onCaptureFullScreen?.call();
       case 'capture_region':
         onCaptureRegion?.call();
+      case 'capture_scroll':
+        onCaptureScroll?.call();
       case 'quit':
         onQuit?.call();
     }

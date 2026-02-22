@@ -37,6 +37,21 @@ class ScreenCapture {
   });
 }
 
+/// A window identified as a scroll capture target.
+class ScrollTargetWindow {
+  final int windowId;
+  final int ownerPid;
+
+  /// Window bounds in CG coordinates (top-left origin).
+  final Rect bounds;
+
+  const ScrollTargetWindow({
+    required this.windowId,
+    required this.ownerPid,
+    required this.bounds,
+  });
+}
+
 class WindowService {
   static const _minPreviewSize = Size(400, 300);
   static const _channel = MethodChannel('com.asnap/window');
@@ -54,6 +69,10 @@ class WindowService {
   /// Rects are in global CG coordinates (top-left origin).
   void Function(List<DetectedWindow> windows)? onRectsUpdated;
 
+  /// Called when the CGEvent tap captures a click during scroll target selection.
+  /// The offset is in global CG coordinates (top-left origin).
+  void Function(Offset cgPoint)? onScrollTargetClicked;
+
   Future<void> ensureInitialized() async {
     await windowManager.ensureInitialized();
 
@@ -65,6 +84,11 @@ class WindowService {
         onOverlayDisplayChanged?.call();
       } else if (call.method == 'onEscPressed') {
         onEscPressed?.call();
+      } else if (call.method == 'onScrollTargetClicked') {
+        final args = Map<String, dynamic>.from(call.arguments as Map);
+        final x = (args['x'] as num).toDouble();
+        final y = (args['y'] as num).toDouble();
+        onScrollTargetClicked?.call(Offset(x, y));
       } else if (call.method == 'onRectsUpdated') {
         final rawList = call.arguments as List<dynamic>?;
         if (rawList != null) {
@@ -319,6 +343,136 @@ class WindowService {
       (result['width'] as num).toDouble(),
       (result['height'] as num).toDouble(),
     );
+  }
+
+  // MARK: - Scroll capture methods
+
+  /// Install a CGEvent tap that intercepts the next left mouse click.
+  /// When fired, [onScrollTargetClicked] is called with CG coordinates
+  /// and the click is suppressed (not delivered to the target app).
+  Future<void> startClickMonitor() async {
+    await _channel.invokeMethod('startClickMonitor');
+  }
+
+  /// Remove the CGEvent tap. Safe to call even if not monitoring.
+  Future<void> stopClickMonitor() async {
+    await _channel.invokeMethod('stopClickMonitor');
+  }
+
+  /// Find the frontmost non-aSnap window at [cgPoint] (CG coordinates).
+  /// Returns window ID, owner PID, and bounds, or `null` if nothing found.
+  Future<ScrollTargetWindow?> hitTestScrollTarget(Offset cgPoint) async {
+    final result = await _channel.invokeMethod<Map>('hitTestScrollTarget', {
+      'x': cgPoint.dx,
+      'y': cgPoint.dy,
+    });
+    if (result == null) return null;
+    return ScrollTargetWindow(
+      windowId: (result['windowId'] as num).toInt(),
+      ownerPid: (result['ownerPid'] as num).toInt(),
+      bounds: Rect.fromLTWH(
+        (result['boundsX'] as num).toDouble(),
+        (result['boundsY'] as num).toDouble(),
+        (result['boundsWidth'] as num).toDouble(),
+        (result['boundsHeight'] as num).toDouble(),
+      ),
+    );
+  }
+
+  /// Capture a specific window by its CGWindowID.
+  /// Returns raw BGRA pixel data + window bounds, or `null` if the window
+  /// is no longer visible.
+  Future<ScreenCapture?> captureWindow(int windowId) async {
+    final result = await _channel.invokeMethod<Map>('captureWindow', {
+      'windowId': windowId,
+    });
+    if (result == null) return null;
+    return ScreenCapture(
+      bytes: result['bytes'] as Uint8List,
+      pixelWidth: (result['pixelWidth'] as num).toInt(),
+      pixelHeight: (result['pixelHeight'] as num).toInt(),
+      bytesPerRow: (result['bytesPerRow'] as num).toInt(),
+      screenSize: Size(
+        (result['boundsWidth'] as num).toDouble(),
+        (result['boundsHeight'] as num).toDouble(),
+      ),
+      screenOrigin: Offset(
+        (result['boundsX'] as num).toDouble(),
+        (result['boundsY'] as num).toDouble(),
+      ),
+    );
+  }
+
+  /// Bring the window with [windowId] to the front by activating its
+  /// owning application.
+  Future<void> activateWindowById(int windowId) async {
+    await _channel.invokeMethod('activateWindowById', {'windowId': windowId});
+  }
+
+  /// Send a scroll wheel event to the center of the window with [windowId].
+  /// [deltaPixels] is negative for downward scroll.
+  Future<void> scrollWindow({
+    required int windowId,
+    required double deltaPixels,
+  }) async {
+    await _channel.invokeMethod('scrollWindow', {
+      'windowId': windowId,
+      'deltaPixels': deltaPixels,
+    });
+  }
+
+  /// Show a small floating badge window near [anchorRect] (CG coordinates).
+  /// The badge is passive: `.statusBar` level, `ignoresMouseEvents = true`.
+  Future<void> showScrollBadge({required Rect anchorRect}) async {
+    await _channel.invokeMethod('showScrollBadge', {
+      'anchorX': anchorRect.left,
+      'anchorY': anchorRect.top,
+      'anchorWidth': anchorRect.width,
+    });
+  }
+
+  /// Show scroll capture preview: fixed window sized for tall images.
+  /// Uses 50% screen width × 75% screen height.
+  Future<void> showScrollPreview({
+    required int imageWidth,
+    required int imageHeight,
+    required Size screenSize,
+    required Offset screenOrigin,
+  }) async {
+    if (imageWidth <= 0 || imageHeight <= 0) return;
+
+    await _channel.invokeMethod('exitOverlayMode');
+
+    final winW = (screenSize.width * 0.50).clamp(400.0, screenSize.width * 0.7);
+    final winH = (screenSize.height * 0.75).clamp(
+      300.0,
+      screenSize.height * 0.85,
+    );
+    final previewSize = Size(winW, winH);
+
+    await windowManager.setMinimumSize(const Size(0, 0));
+    await windowManager.setMaximumSize(
+      Size(screenSize.width, screenSize.height),
+    );
+    await windowManager.setTitleBarStyle(
+      TitleBarStyle.hidden,
+      windowButtonVisibility: false,
+    );
+    await windowManager.setSize(previewSize);
+    await windowManager.setMinimumSize(previewSize);
+    await windowManager.setMaximumSize(previewSize);
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.setSkipTaskbar(true);
+    await windowManager.setHasShadow(true);
+
+    final x = screenOrigin.dx + (screenSize.width - previewSize.width) / 2;
+    final y = screenOrigin.dy + (screenSize.height - previewSize.height) / 2;
+    await windowManager.setPosition(Offset(x, y));
+
+    await windowManager.show();
+    await _focusAndActivateWindow();
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    await _focusAndActivateWindow();
   }
 
   Future<void> hidePreview() async {

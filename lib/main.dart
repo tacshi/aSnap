@@ -10,6 +10,7 @@ import 'services/capture_service.dart';
 import 'services/clipboard_service.dart';
 import 'services/file_service.dart';
 import 'services/hotkey_service.dart';
+import 'services/scroll_capture_service.dart';
 import 'services/tray_service.dart';
 import 'services/window_service.dart';
 import 'state/app_state.dart';
@@ -54,6 +55,7 @@ late final ClipboardService _clipboardService;
 late final FileService _fileService;
 late final HotkeyService _hotkeyService;
 late final TrayService _trayService;
+late final ScrollCaptureService _scrollCaptureService;
 late final WindowService _windowService;
 
 void main() async {
@@ -64,6 +66,7 @@ void main() async {
   _clipboardService = ClipboardService();
   _fileService = FileService();
   _hotkeyService = HotkeyService();
+  _scrollCaptureService = ScrollCaptureService();
   _trayService = TrayService();
   _windowService = WindowService();
 
@@ -78,6 +81,7 @@ void main() async {
       onRegionSelected: _handleRegionSelected,
       onRegionCancel: _handleRegionCancel,
       onHitTest: _handleHitTest,
+      onScrollCancel: _handleScrollCancel,
     ),
   );
 
@@ -104,11 +108,13 @@ Future<void> _initAfterRunApp() async {
   await _trayService.init();
   _trayService.onCaptureFullScreen = _handleFullScreenCapture;
   _trayService.onCaptureRegion = _handleRegionCapture;
+  _trayService.onCaptureScroll = _handleScrollCapture;
   _trayService.onQuit = _handleQuit;
 
   await _hotkeyService.register(
     onFullScreen: _handleFullScreenCapture,
     onRegion: _handleRegionCapture,
+    onScrollCapture: _handleScrollCapture,
   );
 
   // Start background rect polling — keeps window/element rects ready
@@ -140,6 +146,19 @@ void _handleEscPressed() {
           _escActionInProgress = false;
         }),
       );
+      return;
+    case CaptureStatus.scrollWaiting:
+      if (_escActionInProgress) return;
+      _escActionInProgress = true;
+      unawaited(
+        _handleScrollCancel().whenComplete(() {
+          _escActionInProgress = false;
+        }),
+      );
+      return;
+    case CaptureStatus.scrollCapturing:
+      // Signal loop to stop; loop handles partial result logic
+      _scrollCaptureService.requestCancel();
       return;
     case CaptureStatus.idle:
       return;
@@ -363,9 +382,7 @@ Future<void> _handleDisplayChanged() async {
       localRects = cached.localRects;
     } else if (_cachedGlobalWindows.isNotEmpty) {
       localRects = _globalRectsToLocal(capture.screenOrigin);
-      _displayCaches[key] = _DisplayCache(
-        localRects: localRects,
-      );
+      _displayCaches[key] = _DisplayCache(localRects: localRects);
     } else {
       localRects = const [];
     }
@@ -401,9 +418,7 @@ Future<void> _handleDisplayChanged() async {
             ),
           )
           .toList();
-      _displayCaches[key] = _DisplayCache(
-        localRects: fetchedRects,
-      );
+      _displayCaches[key] = _DisplayCache(localRects: fetchedRects);
       _appState.updateWindowRects(fetchedRects);
     }
   } finally {
@@ -532,6 +547,75 @@ Future<void> _handleDiscard() async {
   await _windowService.hidePreview();
   // Non-blocking cleanup after window is gone.
   _clearDisplayCaches();
+  unawaited(_windowService.stopEscMonitor());
+  unawaited(_windowService.startRectPolling());
+}
+
+Future<void> _handleScrollCapture() async {
+  if (_appState.status == CaptureStatus.capturing ||
+      _appState.status == CaptureStatus.scrollWaiting ||
+      _appState.status == CaptureStatus.scrollCapturing) {
+    return;
+  }
+  _escActionInProgress = false;
+  await _windowService.stopEscMonitor();
+  _appState.setCapturing();
+  await _windowService.hidePreview();
+
+  _appState.setScrollWaiting();
+  _windowService.onScrollTargetClicked = _handleScrollTargetClicked;
+  await _windowService.startClickMonitor();
+  await _windowService.startEscMonitor();
+}
+
+Future<void> _handleScrollTargetClicked(Offset cgPoint) async {
+  await _windowService.stopClickMonitor();
+  await _windowService.stopEscMonitor();
+
+  final target = await _windowService.hitTestScrollTarget(cgPoint);
+  if (target == null) {
+    _appState.clear();
+    await _windowService.hidePreview();
+    await _windowService.startRectPolling();
+    return;
+  }
+
+  _appState.setScrollCapturing(targetBounds: target.bounds);
+  await _windowService.showScrollBadge(anchorRect: target.bounds);
+
+  _scrollCaptureService.onProgress = _appState.updateScrollFrameCount;
+  await _windowService.startEscMonitor();
+
+  final result = await _scrollCaptureService.captureScrolling(
+    windowId: target.windowId,
+    windowBounds: target.bounds,
+    windowService: _windowService,
+  );
+
+  await _windowService.stopEscMonitor();
+
+  if (result != null) {
+    _appState.setCapturedScrollImage(result);
+    await _windowService.showScrollPreview(
+      imageWidth: result.width,
+      imageHeight: result.height,
+      screenSize: Size(target.bounds.width, target.bounds.height),
+      screenOrigin: Offset(target.bounds.left, target.bounds.top),
+    );
+    _appState.nudge();
+    await _windowService.startEscMonitor();
+  } else {
+    _appState.clear();
+    await _windowService.hidePreview();
+    await _windowService.startRectPolling();
+  }
+}
+
+Future<void> _handleScrollCancel() async {
+  await _windowService.stopClickMonitor();
+  _scrollCaptureService.requestCancel();
+  _appState.clear();
+  await _windowService.hidePreview();
   unawaited(_windowService.stopEscMonitor());
   unawaited(_windowService.startRectPolling());
 }
