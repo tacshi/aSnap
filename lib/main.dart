@@ -475,50 +475,57 @@ Future<void> _handleRegionSelected(Rect logicalRect) async {
 }
 
 Future<void> _handleRegionCancel() async {
-  await _windowService.stopEscMonitor();
-  _clearDisplayCaches();
+  // Clear state and hide immediately for instant visual feedback.
   _appState.clear();
   await _windowService.hidePreview();
   // Clean up overlay properties (monitors, level, isOpaque, etc.).
   // Without this, the display-change monitor stays active after cancel,
   // and the window retains borderless/maximumWindow configuration.
   await _windowService.exitOverlay();
-  await _windowService.startRectPolling();
+  _clearDisplayCaches();
+  unawaited(_windowService.stopEscMonitor());
+  unawaited(_windowService.startRectPolling());
 }
 
 Future<void> _handleCopy() async {
   _escActionInProgress = false;
-  await _windowService.stopEscMonitor();
+  // Encode PNG while image is still alive, then hide immediately.
   final png = await _appState.capturedImageAsPng();
+  _appState.clear();
+  await _windowService.hidePreview();
+  // Copy to clipboard after window is gone — user perceives instant dismiss.
   if (png != null) {
     await _clipboardService.copyImage(png);
   }
   _clearDisplayCaches();
-  _appState.clear();
-  await _windowService.hidePreview();
-  await _windowService.startRectPolling();
+  unawaited(_windowService.stopEscMonitor());
+  unawaited(_windowService.startRectPolling());
 }
 
 Future<void> _handleSave() async {
   _escActionInProgress = false;
-  await _windowService.stopEscMonitor();
+  // Encode PNG while image is still alive, then hide immediately.
   final png = await _appState.capturedImageAsPng();
+  _appState.clear();
+  await _windowService.hidePreview();
+  // Save to file after window is gone — user perceives instant dismiss.
   if (png != null) {
     await _fileService.saveScreenshot(png);
   }
   _clearDisplayCaches();
-  _appState.clear();
-  await _windowService.hidePreview();
-  await _windowService.startRectPolling();
+  unawaited(_windowService.stopEscMonitor());
+  unawaited(_windowService.startRectPolling());
 }
 
 Future<void> _handleDiscard() async {
   _escActionInProgress = false;
-  await _windowService.stopEscMonitor();
-  _clearDisplayCaches();
+  // Hide window immediately for instant visual feedback.
   _appState.clear();
   await _windowService.hidePreview();
-  await _windowService.startRectPolling();
+  // Non-blocking cleanup after window is gone.
+  _clearDisplayCaches();
+  unawaited(_windowService.stopEscMonitor());
+  unawaited(_windowService.startRectPolling());
 }
 
 Future<void> _handleQuit() async {

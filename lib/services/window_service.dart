@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -324,7 +326,8 @@ class WindowService {
     // Restoring styleMask on a "hidden" window can still flash because macOS
     // may briefly redisplay the window when styleMask changes.
     await windowManager.hide();
-    await windowManager.setAlwaysOnTop(false);
+    // Window is already invisible — no need to block on this.
+    unawaited(windowManager.setAlwaysOnTop(false));
   }
 
   Future<void> _focusAndActivateWindow() async {
