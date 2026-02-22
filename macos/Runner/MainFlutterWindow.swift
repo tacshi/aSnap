@@ -20,17 +20,20 @@ class MainFlutterWindow: NSWindow {
   // Local Esc key monitor (catches Escape when our window is key but at alpha=0)
   private var localEscMonitor: Any?
 
-  /// Append a debug line to ~/asnap_overlay.log
+  /// Append a debug line to ~/asnap_overlay.log (debug builds only).
   private static func log(_ msg: String) {
+    #if DEBUG
     let line = "\(Date()) \(msg)\n"
+    guard let data = line.data(using: .utf8) else { return }
     let path = NSHomeDirectory() + "/asnap_overlay.log"
     if let fh = FileHandle(forWritingAtPath: path) {
       fh.seekToEndOfFile()
-      fh.write(line.data(using: .utf8)!)
+      fh.write(data)
       fh.closeFile()
     } else {
-      FileManager.default.createFile(atPath: path, contents: line.data(using: .utf8))
+      FileManager.default.createFile(atPath: path, contents: data)
     }
+    #endif
   }
 
   override func awakeFromNib() {
@@ -78,9 +81,13 @@ class MainFlutterWindow: NSWindow {
         if allDisplays {
           // Union of all display bounds in CG coordinates (top-left origin)
           var dCount: UInt32 = 0
-          CGGetActiveDisplayList(0, nil, &dCount)
+          guard CGGetActiveDisplayList(0, nil, &dCount) == .success, dCount > 0 else {
+            result(nil); return
+          }
           var dIDs = [CGDirectDisplayID](repeating: 0, count: Int(dCount))
-          CGGetActiveDisplayList(dCount, &dIDs, &dCount)
+          guard CGGetActiveDisplayList(dCount, &dIDs, &dCount) == .success, dCount > 0 else {
+            result(nil); return
+          }
           var unionCG = CGDisplayBounds(dIDs[0])
           for i in 1..<Int(dCount) { unionCG = unionCG.union(CGDisplayBounds(dIDs[i])) }
 

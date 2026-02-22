@@ -360,6 +360,8 @@ Future<void> _handleDisplayChanged() async {
     final capture = await _windowService.captureScreen();
     if (capture == null) {
       _appState.clear();
+      await _windowService.exitOverlay();
+      await _windowService.startRectPolling();
       return;
     }
 
