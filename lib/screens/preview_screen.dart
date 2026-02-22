@@ -58,8 +58,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
     return ListenableBuilder(
       listenable: widget.appState,
       builder: (context, _) {
-        final bytes = widget.appState.screenshotBytes;
-        if (bytes == null) {
+        final image = widget.appState.capturedImage;
+        if (image == null) {
           return const ColoredBox(color: Color(0xFF1E1E1E));
         }
 
@@ -77,8 +77,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // Screenshot fills the entire window
-                Image.memory(bytes, fit: BoxFit.contain, gaplessPlayback: true),
+                // Screenshot fills the entire window (decoded ui.Image)
+                RawImage(image: image, fit: BoxFit.contain),
 
                 // Floating toolbar at bottom center
                 Positioned(

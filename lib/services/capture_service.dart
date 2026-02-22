@@ -19,46 +19,36 @@ class CaptureService {
     return _readFile(imagePath);
   }
 
-  /// Crop a region from a full-screen PNG image.
+  /// Crop a region from a decoded full-screen image.
   /// [physicalRect] is in physical pixel coordinates.
-  Future<Uint8List?> cropImage(Uint8List pngBytes, ui.Rect physicalRect) async {
-    final codec = await ui.instantiateImageCodec(pngBytes);
-    final frame = await codec.getNextFrame();
-    final image = frame.image;
-
-    final clampedLeft = physicalRect.left.clamp(0.0, image.width.toDouble());
-    final clampedTop = physicalRect.top.clamp(0.0, image.height.toDouble());
+  /// Returns a new [ui.Image] — caller owns it and must dispose.
+  Future<ui.Image?> cropImage(ui.Image source, ui.Rect physicalRect) async {
+    final clampedLeft = physicalRect.left.clamp(0.0, source.width.toDouble());
+    final clampedTop = physicalRect.top.clamp(0.0, source.height.toDouble());
     final srcRect = ui.Rect.fromLTWH(
       clampedLeft,
       clampedTop,
-      physicalRect.width.clamp(0, image.width - clampedLeft),
-      physicalRect.height.clamp(0, image.height - clampedTop),
+      physicalRect.width.clamp(0, source.width - clampedLeft),
+      physicalRect.height.clamp(0, source.height - clampedTop),
     );
 
     if (srcRect.width <= 0 || srcRect.height <= 0) {
-      image.dispose();
-      codec.dispose();
       return null;
     }
 
     final recorder = ui.PictureRecorder();
     final canvas = ui.Canvas(recorder);
     final dstRect = ui.Rect.fromLTWH(0, 0, srcRect.width, srcRect.height);
-    canvas.drawImageRect(image, srcRect, dstRect, ui.Paint());
+    canvas.drawImageRect(source, srcRect, dstRect, ui.Paint());
     final picture = recorder.endRecording();
 
     final cropped = await picture.toImage(
       srcRect.width.round(),
       srcRect.height.round(),
     );
-    final byteData = await cropped.toByteData(format: ui.ImageByteFormat.png);
-
-    image.dispose();
-    codec.dispose();
     picture.dispose();
-    cropped.dispose();
 
-    return byteData?.buffer.asUint8List();
+    return cropped;
   }
 
   Future<bool> checkPermission() async {

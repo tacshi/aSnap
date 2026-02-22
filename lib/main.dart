@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -148,37 +147,30 @@ void _handleEscPressed() {
   }
 }
 
-/// Decode image dimensions from PNG bytes.
-Future<Size> _getImageSize(Uint8List bytes) async {
-  final codec = await ui.instantiateImageCodec(bytes);
-  final frame = await codec.getNextFrame();
-  final size = Size(
-    frame.image.width.toDouble(),
-    frame.image.height.toDouble(),
+/// Decode raw BGRA pixel bytes into a ui.Image via GPU upload.
+/// Near-instant compared to PNG codec decode.
+Future<ui.Image> _decodeRawPixels(ScreenCapture capture) {
+  final completer = Completer<ui.Image>();
+  ui.decodeImageFromPixels(
+    capture.bytes,
+    capture.pixelWidth,
+    capture.pixelHeight,
+    ui.PixelFormat.bgra8888,
+    completer.complete,
+    rowBytes: capture.bytesPerRow,
   );
-  frame.image.dispose();
-  codec.dispose();
-  return size;
-}
-
-/// Decode PNG bytes into a ui.Image. Caller owns the returned image.
-Future<ui.Image> _decodeImageBytes(Uint8List bytes) async {
-  final codec = await ui.instantiateImageCodec(bytes);
-  final frame = await codec.getNextFrame();
-  codec.dispose();
-  return frame.image;
+  return completer.future;
 }
 
 Future<void> _showPreviewWithImage(
-  Uint8List bytes, {
+  ui.Image image, {
   required Size targetScreenSize,
   required Offset targetScreenOrigin,
 }) async {
-  _appState.setCapturedImage(bytes);
-  final imgSize = await _getImageSize(bytes);
+  _appState.setCapturedImage(image);
   await _windowService.showPreview(
-    imageWidth: imgSize.width.toInt(),
-    imageHeight: imgSize.height.toInt(),
+    imageWidth: image.width,
+    imageHeight: image.height,
     screenSize: targetScreenSize,
     screenOrigin: targetScreenOrigin,
   );
@@ -216,8 +208,9 @@ Future<void> _handleFullScreenCapture() async {
   // Native capture targets the display under the cursor
   final capture = await _windowService.captureScreen();
   if (capture != null) {
+    final decodedImage = await _decodeRawPixels(capture);
     await _showPreviewWithImage(
-      capture.bytes,
+      decodedImage,
       targetScreenSize: capture.screenSize,
       targetScreenOrigin: capture.screenOrigin,
     );
@@ -279,9 +272,8 @@ Future<void> _handleRegionCapture() async {
       localRects: localRects,
     );
 
-    // Pre-decode PNG so Flutter can paint immediately via RawImage
-    // (no async Image.memory decode that would show stale content).
-    final decodedImage = await _decodeImageBytes(capture.bytes);
+    // Decode raw BGRA pixels — near-instant GPU upload (no PNG codec).
+    final decodedImage = await _decodeRawPixels(capture);
 
     // Bail if user pressed Esc during decode — we own the image, dispose it.
     if (_regionCaptureCancelled) {
@@ -294,7 +286,6 @@ Future<void> _handleRegionCapture() async {
     }
 
     _appState.setSelecting(
-      capture.bytes,
       decodedImage: decodedImage,
       windowRects: localRects,
       screenSize: capture.screenSize,
@@ -382,15 +373,14 @@ Future<void> _handleDisplayChanged() async {
       localRects = const [];
     }
 
-    // 4. Pre-decode the new screenshot so RawImage can paint it instantly.
-    final decodedImage = await _decodeImageBytes(capture.bytes);
+    // 4. Decode raw BGRA pixels — near-instant GPU upload.
+    final decodedImage = await _decodeRawPixels(capture);
 
     // 5. Move the invisible overlay to the new display (setFrame only).
     await _windowService.repositionOverlay(screenOrigin: capture.screenOrigin);
 
     // 6. Update Flutter state with the pre-decoded image.
     _appState.setSelecting(
-      capture.bytes,
       decodedImage: decodedImage,
       windowRects: localRects,
       screenSize: capture.screenSize,
@@ -430,21 +420,18 @@ Future<void> _handleDisplayChanged() async {
 }
 
 Future<void> _handleRegionSelected(Rect logicalRect) async {
-  final fullScreenBytes = _appState.fullScreenBytes;
+  final decodedFullScreen = _appState.decodedFullScreen;
   final screenSize = _appState.screenSize;
   final screenOrigin = _appState.screenOrigin;
-  if (fullScreenBytes == null || screenSize == null || screenOrigin == null) {
+  if (decodedFullScreen == null || screenSize == null || screenOrigin == null) {
     _appState.clear();
     await _windowService.hidePreview();
     return;
   }
 
-  // Get the device pixel ratio from the captured image vs the captured display.
-  // The image is in physical pixels; the selection rect is in logical pixels.
-  final imgSize = await _getImageSize(fullScreenBytes);
-
-  final scaleX = imgSize.width / screenSize.width;
-  final scaleY = imgSize.height / screenSize.height;
+  // The decoded image is in physical pixels; the selection rect is in logical pixels.
+  final scaleX = decodedFullScreen.width / screenSize.width;
+  final scaleY = decodedFullScreen.height / screenSize.height;
 
   final physicalRect = Rect.fromLTRB(
     logicalRect.left * scaleX,
@@ -454,7 +441,7 @@ Future<void> _handleRegionSelected(Rect logicalRect) async {
   );
 
   final cropped = await _captureService.cropImage(
-    fullScreenBytes,
+    decodedFullScreen,
     physicalRect,
   );
   if (cropped != null) {
@@ -502,9 +489,9 @@ Future<void> _handleRegionCancel() async {
 Future<void> _handleCopy() async {
   _escActionInProgress = false;
   await _windowService.stopEscMonitor();
-  final bytes = _appState.screenshotBytes;
-  if (bytes != null) {
-    await _clipboardService.copyImage(bytes);
+  final png = await _appState.capturedImageAsPng();
+  if (png != null) {
+    await _clipboardService.copyImage(png);
   }
   _clearDisplayCaches();
   _appState.clear();
@@ -515,9 +502,9 @@ Future<void> _handleCopy() async {
 Future<void> _handleSave() async {
   _escActionInProgress = false;
   await _windowService.stopEscMonitor();
-  final bytes = _appState.screenshotBytes;
-  if (bytes != null) {
-    await _fileService.saveScreenshot(bytes);
+  final png = await _appState.capturedImageAsPng();
+  if (png != null) {
+    await _fileService.saveScreenshot(png);
   }
   _clearDisplayCaches();
   _appState.clear();

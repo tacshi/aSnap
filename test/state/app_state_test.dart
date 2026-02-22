@@ -1,9 +1,21 @@
-import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:a_snap/state/app_state.dart';
+
+/// Create a simple 1x1 test image using PictureRecorder.
+Future<Image> _createTestImage() async {
+  final recorder = PictureRecorder();
+  Canvas(recorder).drawRect(
+    const Rect.fromLTWH(0, 0, 1, 1),
+    Paint()..color = const Color(0xFFFF0000),
+  );
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(1, 1);
+  picture.dispose();
+  return image;
+}
 
 void main() {
   late AppState state;
@@ -15,8 +27,7 @@ void main() {
   group('initial state', () {
     test('starts idle with null fields', () {
       expect(state.status, CaptureStatus.idle);
-      expect(state.screenshotBytes, isNull);
-      expect(state.fullScreenBytes, isNull);
+      expect(state.capturedImage, isNull);
       expect(state.decodedFullScreen, isNull);
       expect(state.windowRects, isNull);
       expect(state.screenSize, isNull);
@@ -37,13 +48,12 @@ void main() {
   });
 
   group('setCapturedImage', () {
-    test('stores bytes and transitions to captured', () {
-      final bytes = Uint8List.fromList([1, 2, 3]);
-      state.setCapturedImage(bytes);
+    testWidgets('stores image and transitions to captured', (tester) async {
+      final image = await _createTestImage();
+      state.setCapturedImage(image);
 
       expect(state.status, CaptureStatus.captured);
-      expect(state.screenshotBytes, bytes);
-      expect(state.fullScreenBytes, isNull);
+      expect(state.capturedImage, isNotNull);
       expect(state.decodedFullScreen, isNull);
       expect(state.windowRects, isNull);
       expect(state.screenSize, isNull);
@@ -77,16 +87,15 @@ void main() {
   });
 
   group('clear', () {
-    test('resets all fields to initial state', () {
-      final bytes = Uint8List.fromList([1, 2, 3]);
-      state.setCapturedImage(bytes);
+    testWidgets('resets all fields to initial state', (tester) async {
+      final image = await _createTestImage();
+      state.setCapturedImage(image);
       expect(state.status, CaptureStatus.captured);
 
       state.clear();
 
       expect(state.status, CaptureStatus.idle);
-      expect(state.screenshotBytes, isNull);
-      expect(state.fullScreenBytes, isNull);
+      expect(state.capturedImage, isNull);
       expect(state.decodedFullScreen, isNull);
       expect(state.windowRects, isNull);
       expect(state.screenSize, isNull);
@@ -94,14 +103,34 @@ void main() {
     });
   });
 
+  group('capturedImageAsPng', () {
+    testWidgets('returns PNG bytes from captured image', (tester) async {
+      final image = await _createTestImage();
+      state.setCapturedImage(image);
+
+      // toByteData(format: png) is a real engine call — needs runAsync.
+      final png = await tester.runAsync(() => state.capturedImageAsPng());
+
+      expect(png, isNotNull);
+      // PNG magic bytes
+      expect(png!.sublist(0, 4), [0x89, 0x50, 0x4E, 0x47]);
+    });
+
+    test('returns null when no image captured', () async {
+      final png = await state.capturedImageAsPng();
+      expect(png, isNull);
+    });
+  });
+
   group('state machine transitions', () {
-    test('idle → capturing → captured → idle', () {
+    testWidgets('idle → capturing → captured → idle', (tester) async {
       expect(state.status, CaptureStatus.idle);
 
       state.setCapturing();
       expect(state.status, CaptureStatus.capturing);
 
-      state.setCapturedImage(Uint8List.fromList([1]));
+      final image = await _createTestImage();
+      state.setCapturedImage(image);
       expect(state.status, CaptureStatus.captured);
 
       state.clear();

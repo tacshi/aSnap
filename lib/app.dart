@@ -34,10 +34,8 @@ class ASnapApp extends StatelessWidget {
         listenable: appState,
         builder: (context, _) {
           if (appState.status == CaptureStatus.selecting &&
-              appState.fullScreenBytes != null &&
               appState.decodedFullScreen != null) {
             return RegionSelectionScreen(
-              fullScreenBytes: appState.fullScreenBytes!,
               decodedImage: appState.decodedFullScreen!,
               windowRects: appState.windowRects ?? const [],
               onCancel: onRegionCancel,

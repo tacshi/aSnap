@@ -10,8 +10,6 @@ import 'package:flutter/services.dart';
 /// semi-transparent scrim on top. Dragging draws a selection rectangle
 /// that cuts through the scrim to reveal the original screenshot.
 class RegionSelectionScreen extends StatefulWidget {
-  final Uint8List fullScreenBytes;
-
   /// Pre-decoded image for instant display (no async Image.memory decode).
   final ui.Image decodedImage;
   final List<Rect> windowRects;
@@ -24,7 +22,6 @@ class RegionSelectionScreen extends StatefulWidget {
 
   const RegionSelectionScreen({
     super.key,
-    required this.fullScreenBytes,
     required this.decodedImage,
     required this.windowRects,
     required this.onCancel,

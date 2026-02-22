@@ -5,16 +5,15 @@ import 'package:flutter/foundation.dart';
 enum CaptureStatus { idle, capturing, selecting, captured }
 
 class AppState extends ChangeNotifier {
-  Uint8List? _screenshotBytes;
-  Uint8List? get screenshotBytes => _screenshotBytes;
-
-  Uint8List? _fullScreenBytes;
-  Uint8List? get fullScreenBytes => _fullScreenBytes;
-
   /// Pre-decoded full-screen image for instant display in the overlay.
   /// Owned by AppState — disposed when replaced or cleared.
   Image? _decodedFullScreen;
   Image? get decodedFullScreen => _decodedFullScreen;
+
+  /// The final captured image (full-screen or cropped region) for preview.
+  /// Owned by AppState — disposed when replaced or cleared.
+  Image? _capturedImage;
+  Image? get capturedImage => _capturedImage;
 
   List<Rect>? _windowRects;
   List<Rect>? get windowRects => _windowRects;
@@ -35,8 +34,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setSelecting(
-    Uint8List fullScreenBytes, {
+  void setSelecting({
     required Image decodedImage,
     List<Rect>? windowRects,
     Size? screenSize,
@@ -44,7 +42,6 @@ class AppState extends ChangeNotifier {
   }) {
     _decodedFullScreen?.dispose();
     _decodedFullScreen = decodedImage;
-    _fullScreenBytes = fullScreenBytes;
     _windowRects = windowRects;
     _screenSize = screenSize;
     _screenOrigin = screenOrigin;
@@ -59,9 +56,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setCapturedImage(Uint8List bytes) {
-    _screenshotBytes = bytes;
-    _fullScreenBytes = null;
+  void setCapturedImage(Image image) {
+    _capturedImage?.dispose();
+    _capturedImage = image;
     _decodedFullScreen?.dispose();
     _decodedFullScreen = null;
     _windowRects = null;
@@ -71,6 +68,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Encode the captured image to PNG bytes on demand (for clipboard/file save).
+  Future<Uint8List?> capturedImageAsPng() async {
+    final image = _capturedImage;
+    if (image == null) return null;
+    final byteData = await image.toByteData(format: ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
   /// Trigger a rebuild without changing any state.
   /// Used when the native window is shown/focused after initial state updates.
   void nudge() {
@@ -78,8 +83,8 @@ class AppState extends ChangeNotifier {
   }
 
   void clear() {
-    _screenshotBytes = null;
-    _fullScreenBytes = null;
+    _capturedImage?.dispose();
+    _capturedImage = null;
     _decodedFullScreen?.dispose();
     _decodedFullScreen = null;
     _windowRects = null;

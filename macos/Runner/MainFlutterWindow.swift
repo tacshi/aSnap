@@ -118,13 +118,22 @@ class MainFlutterWindow: NSWindow {
         }
 
         guard let img = cgImage else { result(nil); return }
-        let bitmapRep = NSBitmapImageRep(cgImage: img)
-        guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+
+        // Extract raw BGRA pixel data directly — avoids PNG encode (~150ms).
+        // Dart side uses decodeImageFromPixels for near-instant GPU upload.
+        guard let dataProvider = img.dataProvider,
+              let cfData = dataProvider.data else {
           result(nil); return
         }
+        let rawPtr = CFDataGetBytePtr(cfData)!
+        let length = CFDataGetLength(cfData)
+        let pixelData = Data(bytes: rawPtr, count: length)
 
         result([
-          "bytes": FlutterStandardTypedData(bytes: pngData),
+          "bytes": FlutterStandardTypedData(bytes: pixelData),
+          "pixelWidth": img.width,
+          "pixelHeight": img.height,
+          "bytesPerRow": img.bytesPerRow,
           "screenWidth": logicalWidth,
           "screenHeight": logicalHeight,
           "screenOriginX": cgOriginX,
