@@ -22,9 +22,9 @@ class TrayService with TrayListener {
     // side can patch keyEquivalent on the menu items before they render.
     final menu = Menu(
       items: [
-        MenuItem(key: 'capture_full_screen', label: 'Full Screen'),
         MenuItem(key: 'capture_region', label: 'Region'),
         MenuItem(key: 'capture_scroll', label: 'Scroll'),
+        MenuItem(key: 'capture_full_screen', label: 'Full Screen'),
         MenuItem.separator(),
         MenuItem(key: 'quit', label: 'Quit $kAppName'),
       ],
@@ -34,17 +34,17 @@ class TrayService with TrayListener {
     if (Platform.isMacOS) {
       await _channel.invokeMethod('registerTrayShortcuts', [
         {
-          'label': 'Full Screen',
+          'label': 'Region',
           'keyEquivalent': '1',
           'modifiers': ['command', 'shift'],
         },
         {
-          'label': 'Region',
+          'label': 'Scroll',
           'keyEquivalent': '2',
           'modifiers': ['command', 'shift'],
         },
         {
-          'label': 'Scroll',
+          'label': 'Full Screen',
           'keyEquivalent': '3',
           'modifiers': ['command', 'shift'],
         },
