@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -168,7 +169,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
 
   void _onPointerDown(PointerDownEvent event) {
     // Right-click → go back one step (Snipaste-style).
-    if (event.buttons & 0x02 /* kSecondaryMouseButton */ != 0) {
+    if ((event.buttons & kSecondaryMouseButton) != 0) {
       _goBack();
       return;
     }
