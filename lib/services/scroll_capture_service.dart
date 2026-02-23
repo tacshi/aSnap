@@ -102,20 +102,37 @@ class ScrollCaptureService {
   Future<ui.Image?> stopCapture() async {
     _captureTimer?.cancel();
     _captureTimer = null;
+    // Mark cancelled so any in-flight _captureFrame exits early after its
+    // current await points and does not mutate/dispose the final image.
+    _cancelled = true;
+
+    // Wait until an in-flight frame capture/update completes. Without this,
+    // stopCapture can race with _updateRunningPreview and return an image that
+    // gets disposed right after Done is clicked.
+    var spins = 0;
+    while (_captureInProgress && spins < 200) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      spins++;
+    }
+
     _stopwatch?.stop();
     _prevBytes = null;
     _lastStoredCols = null;
     _predictedOffset = 0;
-    _runningImage?.dispose();
+    // Prefer the already-stitched live composite. This avoids a second heavy
+    // full stitch pass when the user clicks Done and makes finishing instant.
+    final running = _runningImage;
     _runningImage = null;
+    if (running != null) {
+      return running;
+    }
 
     if (_frames.isEmpty) return null;
 
-    // Single frame — just decode and return it directly
+    // Fallback path when live preview wasn't available.
     if (_frames.length == 1) {
       return _decodePng(_frames.first.pngBytes);
     }
-
     return _stitchFrames(_frames);
   }
 
@@ -506,8 +523,9 @@ class ScrollCaptureService {
   static double colDiff(
     List<List<double>> prevCols,
     List<List<double>> currCols,
-    int offset,
-  ) {
+    int offset, {
+    int skipTopRows = 0,
+  }) {
     final prevH = prevCols.length;
     final currH = currCols.length;
     if (prevH == 0 || currH == 0) return double.infinity;
@@ -516,20 +534,70 @@ class ScrollCaptureService {
     final len = (prevH - offset) < currH ? (prevH - offset) : currH;
     if (len <= 0) return double.infinity;
 
+    final start = skipTopRows.clamp(0, len - 1);
+    final effectiveLen = len - start;
+    // Too little comparable area -> unreliable offset.
+    if (effectiveLen < 8) return double.infinity;
+
     final numGroups = prevCols[0].length;
     double sum = 0;
+    double weightSum = 0;
     int count = 0;
 
-    for (var i = 0; i < len; i++) {
+    for (var i = start; i < len; i++) {
       final pRow = prevCols[offset + i];
       final cRow = currCols[i];
+      // Slightly favor lower rows where scrolled content is typically denser.
+      final progress = (i - start) / effectiveLen;
+      final rowWeight = 1.0 + progress * 0.25;
       for (var g = 0; g < numGroups; g++) {
-        sum += (pRow[g] - cRow[g]).abs();
+        sum += (pRow[g] - cRow[g]).abs() * rowWeight;
+        weightSum += rowWeight;
         count++;
       }
     }
 
-    return count > 0 ? sum / count : double.infinity;
+    return count > 0 && weightSum > 0 ? sum / weightSum : double.infinity;
+  }
+
+  /// Estimate the number of pinned rows at the top (sticky header).
+  /// Rows that are nearly identical at the same Y in both frames are treated
+  /// as fixed and excluded from overlap matching.
+  static int _estimatePinnedTopRows(
+    List<List<double>> prevCols,
+    List<List<double>> currCols,
+  ) {
+    if (prevCols.isEmpty || currCols.isEmpty) return 0;
+    final h = prevCols.length < currCols.length
+        ? prevCols.length
+        : currCols.length;
+    if (h <= 0) return 0;
+
+    final maxScan = (h * 0.35).toInt().clamp(0, h);
+    const rowDiffThreshold = 4.0;
+    int pinned = 0;
+    int mismatchStreak = 0;
+
+    for (var y = 0; y < maxScan; y++) {
+      final pRow = prevCols[y];
+      final cRow = currCols[y];
+      var diff = 0.0;
+      final groups = pRow.length < cRow.length ? pRow.length : cRow.length;
+      for (var g = 0; g < groups; g++) {
+        diff += (pRow[g] - cRow[g]).abs();
+      }
+      diff /= groups > 0 ? groups : 1;
+
+      if (diff <= rowDiffThreshold) {
+        pinned = y + 1;
+        mismatchStreak = 0;
+      } else {
+        mismatchStreak++;
+        // Require a small streak before we stop to tolerate noisy rows.
+        if (mismatchStreak >= 3) break;
+      }
+    }
+    return pinned;
   }
 
   /// Find the overlap between two frames using column-sample comparison.
@@ -546,8 +614,9 @@ class ScrollCaptureService {
     if (prevHeight != currHeight) return 0;
 
     const diffThreshold = 8.0; // max acceptable average column diff
-    const minOffset = 2; // ignore sub-pixel scrolls
+    final minOffset = (prevHeight * 0.01).ceil().clamp(2, 24);
     final maxOffset = (prevHeight * 0.85).toInt();
+    final pinnedTopRows = _estimatePinnedTopRows(prevCols, currCols);
 
     double bestDiff = double.infinity;
     int bestOffset = 0;
@@ -561,7 +630,12 @@ class ScrollCaptureService {
     }
 
     for (final offset in searchOrder) {
-      final diff = colDiff(prevCols, currCols, offset);
+      final diff = colDiff(
+        prevCols,
+        currCols,
+        offset,
+        skipTopRows: pinnedTopRows,
+      );
 
       if (diff < bestDiff) {
         bestDiff = diff;

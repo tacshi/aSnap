@@ -79,6 +79,8 @@ void main() async {
       onSave: _handleSave,
       onDiscard: _handleDiscard,
       onRegionSelected: _handleRegionSelected,
+      onRegionCopy: _handleRegionCopy,
+      onRegionSave: _handleRegionSave,
       onScrollRegionSelected: _handleScrollRegionSelected,
       onRegionCancel: _handleRegionCancel,
       onHitTest: _handleHitTest,
@@ -102,17 +104,23 @@ Future<void> _initAfterRunApp() async {
   }
 
   _windowService.onOverlayCancelled = () {
+    // Ignore native cancel signals while an explicit user action (Done/Esc)
+    // is already being processed to avoid tearing down the next preview state.
+    if (_escActionInProgress) return;
+
     if (_appState.status == CaptureStatus.scrollCapturing) {
-      if (!_escActionInProgress) {
-        _escActionInProgress = true;
-        unawaited(
-          _handleScrollCancel().whenComplete(() {
-            _escActionInProgress = false;
-          }),
-        );
-      }
-    } else {
-      _handleRegionCancel();
+      _escActionInProgress = true;
+      unawaited(
+        _handleScrollCancel().whenComplete(() {
+          _escActionInProgress = false;
+        }),
+      );
+      return;
+    }
+
+    if (_appState.status == CaptureStatus.selecting ||
+        _appState.status == CaptureStatus.scrollSelecting) {
+      unawaited(_handleRegionCancel());
     }
   };
   _windowService.onOverlayDisplayChanged = _handleDisplayChanged;
@@ -332,8 +340,9 @@ Future<void> _handleRegionCapture() async {
     // Bail if user pressed Esc during overlay setup.
     if (_regionCaptureCancelled) {
       _regionCaptureCancelled = false;
+      await _windowService.hidePreview();
       _appState.clear();
-      await _windowService.exitOverlay();
+      await _windowService.cleanupOverlay();
       await _windowService.stopEscMonitor();
       await _windowService.startRectPolling();
       return;
@@ -346,8 +355,9 @@ Future<void> _handleRegionCapture() async {
     // Bail if user pressed Esc during frame wait.
     if (_regionCaptureCancelled) {
       _regionCaptureCancelled = false;
+      await _windowService.hidePreview();
       _appState.clear();
-      await _windowService.exitOverlay();
+      await _windowService.cleanupOverlay();
       await _windowService.stopEscMonitor();
       await _windowService.startRectPolling();
       return;
@@ -385,8 +395,9 @@ Future<void> _handleDisplayChanged() async {
     // 2. Capture the new display.
     final capture = await _windowService.captureScreen();
     if (capture == null) {
+      await _windowService.hidePreview();
       _appState.clear();
-      await _windowService.exitOverlay();
+      await _windowService.cleanupOverlay();
       await _windowService.startRectPolling();
       return;
     }
@@ -517,15 +528,115 @@ Future<void> _handleRegionSelected(Rect logicalRect) async {
   }
 }
 
-Future<void> _handleRegionCancel() async {
-  // Hide window BEFORE clearing state.
+/// Copy the selected region directly from the overlay (Snipaste-style).
+/// Hides the overlay instantly, then crops + encodes + copies in the background.
+/// Uses suspendOverlay (not exitOverlay) to avoid a full-screen flash caused by
+/// styleMask restoration while dismissing the overlay.
+Future<void> _handleRegionCopy(Rect logicalRect) async {
+  final decodedFullScreen = _appState.decodedFullScreen;
+  final screenSize = _appState.screenSize;
+  if (decodedFullScreen == null || screenSize == null) {
+    _appState.clear();
+    await _windowService.hidePreview();
+    return;
+  }
+
+  final scaleX = decodedFullScreen.width / screenSize.width;
+  final scaleY = decodedFullScreen.height / screenSize.height;
+  final physicalRect = Rect.fromLTRB(
+    logicalRect.left * scaleX,
+    logicalRect.top * scaleY,
+    logicalRect.right * scaleX,
+    logicalRect.bottom * scaleY,
+  );
+
+  // Detach the image so clear() won't dispose it — we need it for cropping.
+  _appState.detachDecodedFullScreen();
+
+  // Hide FIRST — user perceives instant dismiss.
   await _windowService.hidePreview();
   _appState.clear();
-  // Clean up overlay properties (monitors, level, isOpaque, etc.).
-  // Without this, the display-change monitor stays active after cancel,
-  // and the window retains borderless/maximumWindow configuration.
-  await _windowService.exitOverlay();
   _clearDisplayCaches();
+  unawaited(_windowService.stopEscMonitor());
+  unawaited(_windowService.suspendOverlay());
+  unawaited(_windowService.startRectPolling());
+
+  // Expensive work after the window is gone.
+  final cropped = await _captureService.cropImage(
+    decodedFullScreen,
+    physicalRect,
+  );
+  if (cropped != null) {
+    final byteData = await cropped.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData != null) {
+      await _clipboardService.copyImage(byteData.buffer.asUint8List());
+    }
+    cropped.dispose();
+  }
+  decodedFullScreen.dispose();
+}
+
+/// Save the selected region directly from the overlay (Snipaste-style).
+/// Shows the save dialog while the overlay is visible (selection stays behind
+/// the sheet). If the user cancels, returns to selection mode.  If they pick
+/// a path, hides the overlay instantly, then crops + encodes + writes.
+Future<void> _handleRegionSave(Rect logicalRect) async {
+  // Show save dialog WHILE overlay is visible — selection stays behind the
+  // NSSavePanel sheet so the user sees what they're saving.
+  final savePath = await _fileService.showSaveDialog();
+  if (savePath == null) return; // User cancelled — stay in selection mode.
+
+  // User picked a path — proceed with hide + crop + save.
+  final decodedFullScreen = _appState.decodedFullScreen;
+  final screenSize = _appState.screenSize;
+  if (decodedFullScreen == null || screenSize == null) {
+    _appState.clear();
+    await _windowService.hidePreview();
+    return;
+  }
+
+  final scaleX = decodedFullScreen.width / screenSize.width;
+  final scaleY = decodedFullScreen.height / screenSize.height;
+  final physicalRect = Rect.fromLTRB(
+    logicalRect.left * scaleX,
+    logicalRect.top * scaleY,
+    logicalRect.right * scaleX,
+    logicalRect.bottom * scaleY,
+  );
+
+  // Detach the image so clear() won't dispose it — we need it for cropping.
+  _appState.detachDecodedFullScreen();
+
+  // Hide overlay instantly — user perceives instant dismiss after save dialog.
+  await _windowService.hidePreview();
+  _appState.clear();
+  _clearDisplayCaches();
+  unawaited(_windowService.stopEscMonitor());
+  unawaited(_windowService.cleanupOverlay());
+  unawaited(_windowService.startRectPolling());
+
+  // Expensive crop + encode + write after the window is gone.
+  final cropped = await _captureService.cropImage(
+    decodedFullScreen,
+    physicalRect,
+  );
+  if (cropped != null) {
+    final byteData = await cropped.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData != null) {
+      await _fileService.saveToPath(savePath, byteData.buffer.asUint8List());
+    }
+    cropped.dispose();
+  }
+  decodedFullScreen.dispose();
+}
+
+Future<void> _handleRegionCancel() async {
+  // Hide window BEFORE clearing state — instant dismiss.
+  await _windowService.hidePreview();
+  _appState.clear();
+  _clearDisplayCaches();
+  // Intentionally defer overlay cleanup to the next show transition.
+  // Immediate cleanup here can cause a visible flash on close.
   unawaited(_windowService.stopEscMonitor());
   unawaited(_windowService.startRectPolling());
 }
@@ -660,8 +771,9 @@ Future<void> _handleScrollCapture() async {
 
     if (_regionCaptureCancelled) {
       _regionCaptureCancelled = false;
+      await _windowService.hidePreview();
       _appState.clear();
-      await _windowService.exitOverlay();
+      await _windowService.cleanupOverlay();
       await _windowService.stopEscMonitor();
       await _windowService.startRectPolling();
       return;
@@ -672,8 +784,9 @@ Future<void> _handleScrollCapture() async {
 
     if (_regionCaptureCancelled) {
       _regionCaptureCancelled = false;
+      await _windowService.hidePreview();
       _appState.clear();
-      await _windowService.exitOverlay();
+      await _windowService.cleanupOverlay();
       await _windowService.stopEscMonitor();
       await _windowService.startRectPolling();
       return;
@@ -731,6 +844,29 @@ Future<void> _handleScrollFinish() async {
   final result = await _scrollCaptureService.stopCapture();
 
   if (result != null) {
+    // Defensive guard: if a disposed/invalid image slips through due to any
+    // unforeseen async race, fail gracefully to idle instead of crashing.
+    int imageWidth;
+    int imageHeight;
+    try {
+      imageWidth = result.width;
+      imageHeight = result.height;
+    } catch (_) {
+      _appState.clear();
+      await _windowService.hidePreview();
+      // Defer overlay cleanup to the next show transition to avoid close flash.
+      await _windowService.startRectPolling();
+      return;
+    }
+    if (imageWidth <= 0 || imageHeight <= 0) {
+      result.dispose();
+      _appState.clear();
+      await _windowService.hidePreview();
+      // Defer overlay cleanup to the next show transition to avoid close flash.
+      await _windowService.startRectPolling();
+      return;
+    }
+
     // Use the screen info from the capture region for preview positioning.
     Size screenSize = const Size(1920, 1080);
     Offset screenOrigin = Offset.zero;
@@ -741,13 +877,13 @@ Future<void> _handleScrollFinish() async {
     }
 
     _appState.setCapturedScrollImage(result);
-    // Don't call hidePreview() here — showScrollPreview calls exitOverlayMode
-    // which handles the transition. Calling hidePreview() first fires
+    // Don't call hidePreview() here — showScrollPreview handles overlay cleanup.
+    // Calling hidePreview() first fires
     // setAlwaysOnTop(false) via unawaited() which can race with the property
     // changes in showScrollPreview.
     await _windowService.showScrollPreview(
-      imageWidth: result.width,
-      imageHeight: result.height,
+      imageWidth: imageWidth,
+      imageHeight: imageHeight,
       screenSize: screenSize,
       screenOrigin: screenOrigin,
     );
@@ -756,7 +892,7 @@ Future<void> _handleScrollFinish() async {
   } else {
     _appState.clear();
     await _windowService.hidePreview();
-    await _windowService.exitOverlay();
+    // Defer overlay cleanup to the next show transition to avoid close flash.
     await _windowService.startRectPolling();
   }
 }
@@ -785,7 +921,7 @@ Future<void> _handleScrollCancel() async {
   _scrollCaptureService.requestCancel();
   _appState.clear();
   await _windowService.hidePreview();
-  await _windowService.exitOverlay();
+  // Defer overlay cleanup to the next show transition to avoid close flash.
   await _windowService.startRectPolling();
 }
 

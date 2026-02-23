@@ -114,8 +114,12 @@ class WindowService {
   }) async {
     if (imageWidth <= 0 || imageHeight <= 0) return;
 
-    // Exit overlay mode first in case we're coming from region selection
-    await _channel.invokeMethod('exitOverlayMode');
+    // Ensure hidden before cleanup to avoid any transient redraw while
+    // transitioning from full-screen overlay to preview.
+    await windowManager.hide();
+    // Clean overlay state first in case we're coming from region selection.
+    // Avoids styleMask restoration while hidden, which can flash on macOS.
+    await _channel.invokeMethod('cleanupOverlayMode');
 
     final maxW = screenSize.width * 0.8;
     final maxH = screenSize.height * 0.8;
@@ -159,6 +163,9 @@ class WindowService {
     final y = screenOrigin.dy + (screenSize.height - previewSize.height) / 2;
     await windowManager.setPosition(Offset(x, y));
 
+    // Restore opacity right before show — cleanupOverlayState leaves alpha=0
+    // to prevent flash during styleMask restoration.
+    await windowManager.setOpacity(1.0);
     await windowManager.show();
     await _focusAndActivateWindow();
 
@@ -185,6 +192,12 @@ class WindowService {
   /// Fully exit overlay mode: restore window style, level, observers.
   Future<void> exitOverlay() async {
     await _channel.invokeMethod('exitOverlayMode');
+  }
+
+  /// Clean overlay-only state without restoring styleMask.
+  /// Use this for fast transitions where restoring style can flash.
+  Future<void> cleanupOverlay() async {
+    await _channel.invokeMethod('cleanupOverlayMode');
   }
 
   /// Make overlay invisible (alpha=0) for display switching.
@@ -398,7 +411,10 @@ class WindowService {
   }) async {
     if (imageWidth <= 0 || imageHeight <= 0) return;
 
-    await _channel.invokeMethod('exitOverlayMode');
+    // Ensure hidden before cleanup to avoid transition flash.
+    await windowManager.hide();
+    // Same as showPreview(): cleanup without style restoration to prevent flash.
+    await _channel.invokeMethod('cleanupOverlayMode');
 
     final maxW = screenSize.width * 0.8;
     final maxH = screenSize.height * 0.85;
@@ -443,6 +459,9 @@ class WindowService {
     final y = screenOrigin.dy + (screenSize.height - previewSize.height) / 2;
     await windowManager.setPosition(Offset(x, y));
 
+    // Restore opacity right before show — cleanupOverlayState leaves alpha=0
+    // to prevent flash during styleMask restoration.
+    await windowManager.setOpacity(1.0);
     await windowManager.show();
     await _focusAndActivateWindow();
     await Future<void>.delayed(const Duration(milliseconds: 40));
@@ -450,7 +469,7 @@ class WindowService {
   }
 
   Future<void> hidePreview() async {
-    // Hide only — defer exitOverlayMode to the next showPreview() call.
+    // Hide only — defer overlay cleanup to the next showPreview() call.
     // Restoring styleMask on a "hidden" window can still flash because macOS
     // may briefly redisplay the window when styleMask changes.
     await windowManager.hide();

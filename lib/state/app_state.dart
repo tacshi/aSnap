@@ -157,6 +157,15 @@ class AppState extends ChangeNotifier {
     return image;
   }
 
+  /// Remove and return the full-screen decoded image without disposing it.
+  /// Caller takes ownership and is responsible for disposal.
+  /// Used by overlay copy/save to detach before clear() disposes it.
+  Image? detachDecodedFullScreen() {
+    final image = _decodedFullScreen;
+    _decodedFullScreen = null;
+    return image;
+  }
+
   /// Trigger a rebuild without changing any state.
   /// Used when the native window is shown/focused after initial state updates.
   void nudge() {

@@ -11,6 +11,11 @@ class ASnapApp extends StatelessWidget {
   final VoidCallback onSave;
   final VoidCallback onDiscard;
   final void Function(Rect selectionRect) onRegionSelected;
+
+  /// Snipaste-style overlay actions for region capture.
+  final void Function(Rect selectionRect)? onRegionCopy;
+  final void Function(Rect selectionRect)? onRegionSave;
+
   final void Function(Rect selectionRect)? onScrollRegionSelected;
   final VoidCallback onRegionCancel;
   final Future<Rect?> Function(Offset localPoint)? onHitTest;
@@ -23,6 +28,8 @@ class ASnapApp extends StatelessWidget {
     required this.onSave,
     required this.onDiscard,
     required this.onRegionSelected,
+    this.onRegionCopy,
+    this.onRegionSave,
     this.onScrollRegionSelected,
     required this.onRegionCancel,
     this.onHitTest,
@@ -51,7 +58,8 @@ class ASnapApp extends StatelessWidget {
               decodedImage: appState.decodedFullScreen!,
               windowRects: appState.windowRects ?? const [],
               onCancel: onRegionCancel,
-              onRegionSelected: onRegionSelected,
+              onCopy: onRegionCopy,
+              onSave: onRegionSave,
               onHitTest: onHitTest,
             );
           }
@@ -63,6 +71,7 @@ class ASnapApp extends StatelessWidget {
               onCancel: onRegionCancel,
               onRegionSelected: onScrollRegionSelected ?? onRegionSelected,
               onHitTest: onHitTest,
+              isScrollSelection: true,
             );
           }
           if (appState.status == CaptureStatus.scrollCapturing) {

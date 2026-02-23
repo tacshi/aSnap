@@ -169,37 +169,24 @@ class MainFlutterWindow: NSWindow {
         // after Flutter renders (which also installs monitors).
         self.configureOverlay(call.arguments as? [String: Double])
         result(nil)
+      case "cleanupOverlayMode":
+        // Overlay cleanup that also restores styleMask (needed so
+        // window_manager's setTitleBarStyle won't crash on a borderless
+        // window).  The alpha=0 guard inside cleanupOverlayState prevents
+        // the hidden-window flash during the styleMask change.
+        self.cleanupOverlayState(restoreStyleMask: true)
+        result(nil)
       case "exitOverlayMode":
-        // Remove scroll stop button panel
-        self.scrollStopPanel?.close()
-        self.scrollStopPanel = nil
-        // Remove space-change observer
-        if let obs = self.spaceChangeObserver {
-          NSWorkspace.shared.notificationCenter.removeObserver(obs)
-          self.spaceChangeObserver = nil
-        }
-        // Remove display-change monitor
-        if let monitor = self.displayChangeMonitor {
-          NSEvent.removeMonitor(monitor)
-          self.displayChangeMonitor = nil
-        }
-        // Remove Esc monitors (safety net — normally stopped by Dart)
-        self.stopEscMonitorImpl()
-        self.overlayScreenFrame = nil
-        // Restore alpha in case overlay was at alpha=0 when exiting
-        self.alphaValue = 1
-        self.styleMask = self.savedStyleMask ?? [.titled, .closable, .miniaturizable, .resizable]
-        self.savedStyleMask = nil
-        // isOpaque stays false — see awakeFromNib comment.
-        self.backgroundColor = .windowBackgroundColor
-        self.contentView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        // Restore Flutter surface opacity (scroll capture sets it transparent).
-        self.setFlutterSurfaceOpaque(true)
-        self.hasShadow = true
-        self.level = .normal
-        self.collectionBehavior = [.moveToActiveSpace]
-        self.ignoresMouseEvents = false
-        self.acceptsMouseMovedEvents = false
+        self.cleanupOverlayState(restoreStyleMask: true)
+        result(nil)
+      case "setResizeCursor":
+        // Set a diagonal resize cursor via private NSCursor API.
+        // Flutter's SystemMouseCursors diagonal variants silently fall back
+        // to the arrow cursor on macOS; calling the private API directly
+        // from Swift works reliably.
+        let args = call.arguments as? [String: Any]
+        let type = args?["type"] as? String ?? ""
+        self.setDiagonalResizeCursor(nwse: type == "nwse")
         result(nil)
       case "suspendOverlay":
         // Make overlay invisible for display switching. Uses alphaValue instead
@@ -933,6 +920,75 @@ class MainFlutterWindow: NSWindow {
       NSEvent.removeMonitor(monitor)
       self.localEscMonitor = nil
     }
+  }
+
+  /// Remove overlay-only observers/panels/state.
+  /// When [restoreStyleMask] is true, also restore the pre-overlay style mask.
+  /// When false, keeps current style mask to avoid flash-prone style changes.
+  private func cleanupOverlayState(restoreStyleMask: Bool) {
+    // Remove scroll stop button panel
+    self.scrollStopPanel?.close()
+    self.scrollStopPanel = nil
+    // Remove space-change observer
+    if let obs = self.spaceChangeObserver {
+      NSWorkspace.shared.notificationCenter.removeObserver(obs)
+      self.spaceChangeObserver = nil
+    }
+    // Remove display-change monitor
+    if let monitor = self.displayChangeMonitor {
+      NSEvent.removeMonitor(monitor)
+      self.displayChangeMonitor = nil
+    }
+    // Remove Esc monitors (safety net — normally stopped by Dart)
+    self.stopEscMonitorImpl()
+    self.overlayScreenFrame = nil
+
+    if restoreStyleMask {
+      // Force alpha=0 BEFORE changing styleMask.  macOS may briefly redisplay
+      // a hidden window when styleMask changes; making it invisible first
+      // prevents a visible flash.
+      self.alphaValue = 0
+      self.styleMask = self.savedStyleMask ?? [.titled, .closable, .miniaturizable, .resizable]
+      self.savedStyleMask = nil
+      // Alpha stays 0 — Dart callers restore via windowManager.setOpacity(1.0)
+      // right before show(), ensuring no intermediate state is visible.
+    }
+    // No else branch needed — callers that don't show the window (copy/cancel)
+    // don't need alpha restored since it resets on next overlay entry.
+
+    // isOpaque stays false — see awakeFromNib comment.
+    self.backgroundColor = .windowBackgroundColor
+    self.contentView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    // Restore Flutter surface opacity (scroll capture sets it transparent).
+    self.setFlutterSurfaceOpaque(true)
+    self.hasShadow = true
+    self.level = .normal
+    self.collectionBehavior = [.moveToActiveSpace]
+    self.ignoresMouseEvents = false
+    self.acceptsMouseMovedEvents = false
+  }
+
+  // MARK: - Cursor helpers
+
+  /// Set a diagonal resize cursor using private NSCursor API.
+  ///
+  /// Flutter's `SystemMouseCursors.resizeUpLeft` etc. silently fall back to
+  /// the arrow cursor on macOS because the Flutter engine's Obj-C bridge
+  /// can't reliably invoke the private `_windowResizeNorthWest…` selectors.
+  /// Calling them directly from Swift works.
+  ///
+  /// - Parameter nwse: `true` for NW↔SE diagonal (topLeft / bottomRight),
+  ///                   `false` for NE↔SW diagonal (topRight / bottomLeft).
+  private func setDiagonalResizeCursor(nwse: Bool) {
+    let selectorName = nwse
+      ? "_windowResizeNorthWestSouthEastCursor"
+      : "_windowResizeNorthEastSouthWestCursor"
+    let sel = NSSelectorFromString(selectorName)
+    guard NSCursor.responds(to: sel),
+          let result = NSCursor.perform(sel),
+          let cursor = result.takeUnretainedValue() as? NSCursor
+    else { return }  // Unavailable — cursor stays as-is (no regression).
+    cursor.set()
   }
 
   // MARK: - Overlay helpers

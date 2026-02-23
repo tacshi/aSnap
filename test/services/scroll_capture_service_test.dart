@@ -38,6 +38,29 @@ Uint8List _gradientFrame(int width, int height) {
   return bytes;
 }
 
+/// Build a frame with a fixed top header and scrolling body.
+/// [scrollAmount] shifts only the body content; header stays unchanged.
+Uint8List _stickyHeaderFrame(
+  int width,
+  int height, {
+  required int headerHeight,
+  required int scrollAmount,
+}) {
+  final bytesPerRow = width * 4;
+  final bytes = Uint8List(height * bytesPerRow);
+  for (var y = 0; y < height; y++) {
+    final v = y < headerHeight ? 32 : ((y - headerHeight + scrollAmount) % 256);
+    for (var x = 0; x < width; x++) {
+      final idx = y * bytesPerRow + x * 4;
+      bytes[idx] = v;
+      bytes[idx + 1] = v;
+      bytes[idx + 2] = v;
+      bytes[idx + 3] = 255;
+    }
+  }
+  return bytes;
+}
+
 void main() {
   group('framesIdentical', () {
     test('identical solid frames → true', () {
@@ -294,6 +317,45 @@ void main() {
 
       final service = ScrollCaptureService();
       service.predictedOffset = scrollAmount; // exact prediction
+
+      final overlap = service.computeOverlap(colsA, colsB, height, height);
+      expect(overlap, height - scrollAmount);
+    });
+
+    test('handles sticky top header without seam offsets', () {
+      const width = 120;
+      const height = 140;
+      const headerHeight = 28;
+      const scrollAmount = 22;
+
+      final frameA = _stickyHeaderFrame(
+        width,
+        height,
+        headerHeight: headerHeight,
+        scrollAmount: 0,
+      );
+      final frameB = _stickyHeaderFrame(
+        width,
+        height,
+        headerHeight: headerHeight,
+        scrollAmount: scrollAmount,
+      );
+
+      final colsA = ScrollCaptureService.columnSamples(
+        frameA,
+        width,
+        height,
+        width * 4,
+      );
+      final colsB = ScrollCaptureService.columnSamples(
+        frameB,
+        width,
+        height,
+        width * 4,
+      );
+
+      final service = ScrollCaptureService();
+      service.predictedOffset = scrollAmount;
 
       final overlap = service.computeOverlap(colsA, colsB, height, height);
       expect(overlap, height - scrollAmount);
