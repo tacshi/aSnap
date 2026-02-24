@@ -33,6 +33,9 @@ bool _hitTestShape(Offset point, Annotation annotation, double threshold) {
             t;
       }
       return _distanceToBezier(point, annotation) <= t;
+    case ShapeType.pencil:
+    case ShapeType.marker:
+      return _distanceToPolyline(point, annotation) <= t;
   }
 }
 
@@ -101,6 +104,18 @@ Offset evaluateBezier(Annotation a, double t) {
         cps[1] * (3 * mt * t * t) +
         a.end * (t * t * t);
   }
+}
+
+/// Distance from [point] to a freehand polyline path.
+double _distanceToPolyline(Offset point, Annotation a) {
+  final pts = a.points;
+  if (pts.length < 2) return double.infinity;
+  double minDist = double.infinity;
+  for (int i = 0; i < pts.length - 1; i++) {
+    final d = distanceToLineSegment(point, pts[i], pts[i + 1]);
+    if (d < minDist) minDist = d;
+  }
+  return minDist;
 }
 
 /// Distance from [point] to line segment [a]-[b].

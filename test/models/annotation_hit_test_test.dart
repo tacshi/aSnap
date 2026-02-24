@@ -159,6 +159,57 @@ void main() {
     });
   });
 
+  group('Polyline (freehand) hit test', () {
+    test('hits pencil stroke near a segment', () {
+      final annotations = [
+        const Annotation(
+          type: ShapeType.pencil,
+          start: Offset(0, 0),
+          end: Offset(100, 0),
+          color: Color(0xFFFF0000),
+          strokeWidth: 2,
+          points: [Offset(0, 0), Offset(50, 30), Offset(100, 0)],
+        ),
+      ];
+      // Point near the midpoint of the first segment (0,0)→(50,30)
+      // At (25, 15) we are ON the line.
+      final idx = hitTestAnnotations(const Offset(25, 18), annotations);
+      expect(idx, 0);
+    });
+
+    test('misses pencil stroke when far away', () {
+      final annotations = [
+        const Annotation(
+          type: ShapeType.pencil,
+          start: Offset(0, 0),
+          end: Offset(100, 0),
+          color: Color(0xFFFF0000),
+          strokeWidth: 2,
+          points: [Offset(0, 0), Offset(50, 30), Offset(100, 0)],
+        ),
+      ];
+      // Point far from all segments.
+      final idx = hitTestAnnotations(const Offset(50, 60), annotations);
+      expect(idx, isNull);
+    });
+
+    test('hits marker stroke (same as pencil hit testing)', () {
+      final annotations = [
+        const Annotation(
+          type: ShapeType.marker,
+          start: Offset(0, 0),
+          end: Offset(100, 0),
+          color: Color(0xFFFF0000),
+          strokeWidth: 6,
+          points: [Offset(0, 0), Offset(100, 0)],
+        ),
+      ];
+      // 3px from the line, within stroke width threshold.
+      final idx = hitTestAnnotations(const Offset(50, 3), annotations);
+      expect(idx, 0);
+    });
+  });
+
   group('distanceToLineSegment', () {
     test('point perpendicular to segment', () {
       final d = distanceToLineSegment(

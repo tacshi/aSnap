@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
 import '../models/annotation.dart';
+import '../utils/path_simplify.dart';
 
 /// Persisted drawing settings used when creating new annotations.
 class DrawingSettings {
@@ -73,35 +74,56 @@ class AnnotationState extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   void startDrawing(Offset startPoint) {
+    final isFreehand =
+        _settings.shapeType == ShapeType.pencil ||
+        _settings.shapeType == ShapeType.marker;
+    final effectiveStrokeWidth = _settings.shapeType == ShapeType.marker
+        ? _settings.strokeWidth * 3
+        : _settings.strokeWidth;
     _activeAnnotation = Annotation(
       type: _settings.shapeType,
       start: startPoint,
       end: startPoint,
       color: _settings.color,
-      strokeWidth: _settings.strokeWidth,
+      strokeWidth: effectiveStrokeWidth,
       cornerRadius: _settings.cornerRadius,
+      points: isFreehand ? [startPoint] : const [],
     );
     notifyListeners();
   }
 
   void updateDrawing(Offset currentPoint, {bool constrained = false}) {
     if (_activeAnnotation == null) return;
-    _activeAnnotation = _activeAnnotation!
-        .withEnd(currentPoint)
-        .withConstrained(constrained);
+    if (_activeAnnotation!.isFreehand) {
+      _activeAnnotation = _activeAnnotation!.appendPoint(currentPoint);
+    } else {
+      _activeAnnotation = _activeAnnotation!
+          .withEnd(currentPoint)
+          .withConstrained(constrained);
+    }
     notifyListeners();
   }
 
   void finishDrawing() {
     if (_activeAnnotation == null) return;
-    final annotation = _activeAnnotation!;
+    var annotation = _activeAnnotation!;
     _activeAnnotation = null;
 
-    // Only commit if the shape has meaningful size.
-    final rect = Rect.fromPoints(annotation.start, annotation.end);
-    if (rect.width.abs() < 2 && rect.height.abs() < 2) {
-      notifyListeners();
-      return;
+    if (annotation.isFreehand) {
+      // Need at least 2 points for a visible stroke.
+      if (annotation.points.length < 2) {
+        notifyListeners();
+        return;
+      }
+      // Simplify path to reduce point count.
+      annotation = annotation.withPoints(simplifyPath(annotation.points));
+    } else {
+      // Only commit if the shape has meaningful size.
+      final rect = Rect.fromPoints(annotation.start, annotation.end);
+      if (rect.width.abs() < 2 && rect.height.abs() < 2) {
+        notifyListeners();
+        return;
+      }
     }
 
     _commitAnnotation(annotation);

@@ -62,6 +62,10 @@ List<AnnHandle> annotationHandles(Annotation annotation) {
             controlPointIndex: i,
           ),
       ];
+    case ShapeType.pencil:
+    case ShapeType.marker:
+      // Freehand shapes have no resize handles.
+      return [];
   }
 }
 
@@ -177,5 +181,6 @@ Annotation _withStartEnd(Annotation a, Offset start, Offset end) {
     cornerRadius: a.cornerRadius,
     constrained: a.constrained,
     controlPoints: a.controlPoints,
+    points: a.points,
   );
 }

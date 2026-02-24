@@ -68,10 +68,7 @@ void main() {
       );
       final handles = annotationHandles(a);
       expect(handles.length, 3); // start + end + 1 control point
-      expect(
-        handles.any((h) => h.type == AnnHandleType.controlPoint),
-        true,
-      );
+      expect(handles.any((h) => h.type == AnnHandleType.controlPoint), true);
     });
   });
 
@@ -114,8 +111,7 @@ void main() {
         strokeWidth: 2,
       );
       final handle = AnnHandle(AnnHandleType.topLeft, const Offset(10, 10));
-      final result =
-          applyAnnotationHandleDrag(a, handle, const Offset(20, 20));
+      final result = applyAnnotationHandleDrag(a, handle, const Offset(20, 20));
       final rect = result.boundingRect;
       // topLeft moved to (20,20), bottomRight stays at (110,60)
       expect(rect.left, 20);
@@ -133,8 +129,7 @@ void main() {
         strokeWidth: 2,
       );
       final handle = AnnHandle(AnnHandleType.top, const Offset(60, 10));
-      final result =
-          applyAnnotationHandleDrag(a, handle, const Offset(60, 5));
+      final result = applyAnnotationHandleDrag(a, handle, const Offset(60, 5));
       final rect = result.boundingRect;
       expect(rect.top, 5);
       expect(rect.bottom, 60);
@@ -150,10 +145,8 @@ void main() {
         color: Color(0xFFFF0000),
         strokeWidth: 2,
       );
-      final handle =
-          AnnHandle(AnnHandleType.startPoint, const Offset(10, 10));
-      final result =
-          applyAnnotationHandleDrag(a, handle, const Offset(20, 20));
+      final handle = AnnHandle(AnnHandleType.startPoint, const Offset(10, 10));
+      final result = applyAnnotationHandleDrag(a, handle, const Offset(20, 20));
       expect(result.start, const Offset(20, 20));
       expect(result.end, const Offset(110, 60)); // unchanged
     });
@@ -172,8 +165,7 @@ void main() {
         const Offset(50, 0),
         controlPointIndex: 0,
       );
-      final result =
-          applyAnnotationHandleDrag(a, handle, const Offset(50, 30));
+      final result = applyAnnotationHandleDrag(a, handle, const Offset(50, 30));
       expect(result.controlPoints, [const Offset(50, 30)]);
     });
   });

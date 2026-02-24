@@ -4,10 +4,13 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import '../models/annotation.dart';
 import '../state/annotation_state.dart';
 
-/// Floating popover for selecting shape type, color, stroke, and corner radius.
+/// Floating popover for editing annotation settings (color, stroke, corner radius).
 ///
 /// Anchored to a [CompositedTransformTarget] via [layerLink]. Positioned
 /// above the target with [Alignment.topCenter] → [Alignment.bottomCenter].
+///
+/// Shape selection is handled by individual toolbar buttons; this popover
+/// only exposes the style settings for the currently active tool.
 class ShapePopover extends StatelessWidget {
   final AnnotationState annotationState;
   final LayerLink layerLink;
@@ -68,8 +71,6 @@ class ShapePopover extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildShapeSelector(settings),
-                      const SizedBox(height: 10),
                       _buildColorRow(context, settings),
                       const SizedBox(height: 10),
                       _buildStrokeSlider(settings),
@@ -85,40 +86,6 @@ class ShapePopover extends StatelessWidget {
           },
         ),
       ),
-    );
-  }
-
-  Widget _buildShapeSelector(DrawingSettings settings) {
-    return Row(
-      children: [
-        _ShapeButton(
-          icon: Icons.crop_square_rounded,
-          label: 'Rectangle',
-          isSelected: settings.shapeType == ShapeType.rectangle,
-          onTap: () => _setShapeType(ShapeType.rectangle),
-        ),
-        const SizedBox(width: 4),
-        _ShapeButton(
-          icon: Icons.circle_outlined,
-          label: 'Ellipse',
-          isSelected: settings.shapeType == ShapeType.ellipse,
-          onTap: () => _setShapeType(ShapeType.ellipse),
-        ),
-        const SizedBox(width: 4),
-        _ShapeButton(
-          icon: Icons.arrow_right_alt_rounded,
-          label: 'Arrow',
-          isSelected: settings.shapeType == ShapeType.arrow,
-          onTap: () => _setShapeType(ShapeType.arrow),
-        ),
-        const SizedBox(width: 4),
-        _ShapeButton(
-          icon: Icons.horizontal_rule_rounded,
-          label: 'Line',
-          isSelected: settings.shapeType == ShapeType.line,
-          onTap: () => _setShapeType(ShapeType.line),
-        ),
-      ],
     );
   }
 
@@ -227,12 +194,6 @@ class ShapePopover extends StatelessWidget {
     );
   }
 
-  void _setShapeType(ShapeType type) {
-    annotationState.updateSettings(
-      annotationState.settings.copyWith(shapeType: type),
-    );
-  }
-
   void _setColor(Color color) {
     annotationState.updateSettings(
       annotationState.settings.copyWith(color: color),
@@ -247,50 +208,6 @@ class ShapePopover extends StatelessWidget {
     trackHeight: 2,
     thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
   );
-}
-
-// ---------------------------------------------------------------------------
-// Shape type button
-// ---------------------------------------------------------------------------
-
-class _ShapeButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _ShapeButton({
-    required this.icon,
-    required this.label,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: label,
-      waitDuration: const Duration(milliseconds: 400),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          hoverColor: Colors.white.withValues(alpha: 0.1),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: isSelected
-                ? BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  )
-                : null,
-            child: Icon(icon, color: Colors.white, size: 18),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------

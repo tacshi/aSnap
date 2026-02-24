@@ -106,9 +106,9 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
   Rect? _detectedWindowRect;
 
   // -- Annotation mode --
-  bool _annotationMode = false;
+  ShapeType? _activeShapeType;
   bool _popoverVisible = false;
-  final _shapesLayerLink = LayerLink();
+  final _settingsLayerLink = LayerLink();
   OverlayEntry? _popoverEntry;
 
   // -- Annotation handle drag state --
@@ -237,7 +237,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
           }
         }
         // In annotation mode: handle selection, handle drags, and drawing.
-        if (_annotationMode && _selectionRect != null) {
+        if (_activeShapeType != null && _selectionRect != null) {
           if (_selectionRect!.contains(pos)) {
             final imagePoint = _widgetToImage(pos);
             final state = widget.annotationState!;
@@ -586,7 +586,8 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
     // Delete/Backspace → delete selected annotation.
     if (event.logicalKey == LogicalKeyboardKey.delete ||
         event.logicalKey == LogicalKeyboardKey.backspace) {
-      if (_annotationMode && widget.annotationState?.selectedIndex != null) {
+      if (_activeShapeType != null &&
+          widget.annotationState?.selectedIndex != null) {
         widget.annotationState!.deleteSelected();
         return false;
       }
@@ -599,8 +600,8 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
       _removePopover();
       return false;
     }
-    if (_annotationMode) {
-      setState(() => _annotationMode = false);
+    if (_activeShapeType != null) {
+      setState(() => _activeShapeType = null);
       return false;
     }
     // Escape exits the overlay.
@@ -624,10 +625,10 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
         });
 
       case _SelectionPhase.selected:
-        if (_annotationMode) {
+        if (_activeShapeType != null) {
           // Exit annotation mode first; keep selection.
           _removePopover();
-          setState(() => _annotationMode = false);
+          setState(() => _activeShapeType = null);
           return;
         }
         widget.annotationState?.clear();
@@ -670,7 +671,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
       case _SelectionPhase.selected:
         if (_selectionRect == null) return SystemMouseCursors.precise;
         // In annotation mode, use precise cursor inside selection.
-        if (_annotationMode && _selectionRect!.contains(_current)) {
+        if (_activeShapeType != null && _selectionRect!.contains(_current)) {
           return SystemMouseCursors.precise;
         }
         final handle = hitTestHandle(_current, _selectionRect!);
@@ -766,18 +767,26 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
   // Annotation popover
   // -----------------------------------------------------------------------
 
-  void _toggleAnnotationMode() {
+  /// Handles tapping a tool button in the toolbar.
+  ///
+  /// - First tap on an inactive tool: activates it and shows settings popover.
+  /// - Tap on the already active tool: toggles the settings popover.
+  /// - Tap on a different tool while one is active: switches tool, shows popover.
+  void _handleToolTap(ShapeType type) {
     setState(() {
-      if (!_annotationMode) {
-        // Activate and show settings.
-        _annotationMode = true;
-        _showPopover();
-      } else if (_popoverVisible) {
-        // Deactivate (popover is open → full toggle off).
-        _removePopover();
-        _annotationMode = false;
+      if (_activeShapeType == type) {
+        // Same tool tapped — toggle popover visibility.
+        if (_popoverVisible) {
+          _removePopover();
+        } else {
+          _showPopover();
+        }
       } else {
-        // Mode active but popover dismissed → re-show settings.
+        // Different tool (or no tool active) — activate and show popover.
+        _activeShapeType = type;
+        widget.annotationState?.updateSettings(
+          widget.annotationState!.settings.copyWith(shapeType: type),
+        );
         _showPopover();
       }
     });
@@ -791,7 +800,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
         children: [
           ShapePopover(
             annotationState: widget.annotationState!,
-            layerLink: _shapesLayerLink,
+            layerLink: _settingsLayerLink,
             onDismiss: () {
               _removePopover();
               _popoverVisible = false;
@@ -892,7 +901,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
                     _selectionRect!.width * dpr,
                     _selectionRect!.height * dpr,
                   ),
-                  enabled: _annotationMode,
+                  enabled: _activeShapeType != null,
                   handlePointerEvents: false,
                 ),
               ),
@@ -931,14 +940,14 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
                               onCopy: _handleToolbarCopy,
                               onSave: _handleToolbarSave,
                               onClose: _handleToolbarClose,
-                              onShapesToggle: _toggleAnnotationMode,
-                              shapesActive: _annotationMode,
+                              onToolTap: _handleToolTap,
+                              activeShapeType: _activeShapeType,
                               hasAnnotations: as_.hasAnnotations,
                               canUndo: as_.canUndo,
                               canRedo: as_.canRedo,
                               onUndo: as_.undo,
                               onRedo: as_.redo,
-                              shapesLayerLink: _shapesLayerLink,
+                              settingsLayerLink: _settingsLayerLink,
                             ),
                           )
                         : SelectionToolbar(

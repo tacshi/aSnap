@@ -1,7 +1,7 @@
 import 'dart:ui';
 
 /// The type of shape annotation.
-enum ShapeType { rectangle, ellipse, arrow, line }
+enum ShapeType { rectangle, ellipse, arrow, line, pencil, marker }
 
 /// Immutable representation of a single drawn annotation.
 ///
@@ -29,6 +29,9 @@ class Annotation {
   /// 1 control point = quadratic, 2 = cubic.
   final List<Offset> controlPoints;
 
+  /// Freehand path points for pencil/marker tools.
+  final List<Offset> points;
+
   const Annotation({
     required this.type,
     required this.start,
@@ -38,9 +41,29 @@ class Annotation {
     this.cornerRadius = 0,
     this.constrained = false,
     this.controlPoints = const [],
+    this.points = const [],
   });
 
-  Rect get boundingRect => Rect.fromPoints(start, end);
+  /// Whether this annotation is a freehand type (pencil or marker).
+  bool get isFreehand => type == ShapeType.pencil || type == ShapeType.marker;
+
+  /// Bounding rect: for freehand types, computed from all path points;
+  /// for others, from start/end.
+  Rect get boundingRect {
+    if (isFreehand && points.length >= 2) {
+      double minX = points[0].dx, maxX = points[0].dx;
+      double minY = points[0].dy, maxY = points[0].dy;
+      for (int i = 1; i < points.length; i++) {
+        final p = points[i];
+        if (p.dx < minX) minX = p.dx;
+        if (p.dx > maxX) maxX = p.dx;
+        if (p.dy < minY) minY = p.dy;
+        if (p.dy > maxY) maxY = p.dy;
+      }
+      return Rect.fromLTRB(minX, minY, maxX, maxY);
+    }
+    return Rect.fromPoints(start, end);
+  }
 
   Annotation withEnd(Offset newEnd) => Annotation(
     type: type,
@@ -51,6 +74,7 @@ class Annotation {
     cornerRadius: cornerRadius,
     constrained: constrained,
     controlPoints: controlPoints,
+    points: points,
   );
 
   Annotation withConstrained(bool value) => Annotation(
@@ -62,6 +86,7 @@ class Annotation {
     cornerRadius: cornerRadius,
     constrained: value,
     controlPoints: controlPoints,
+    points: points,
   );
 
   /// Returns a copy with the control point at [index] replaced by [point].
@@ -77,6 +102,7 @@ class Annotation {
       cornerRadius: cornerRadius,
       constrained: constrained,
       controlPoints: updated,
+      points: points,
     );
   }
 
@@ -92,6 +118,7 @@ class Annotation {
       cornerRadius: cornerRadius,
       constrained: constrained,
       controlPoints: [...controlPoints, point],
+      points: points,
     );
   }
 
@@ -107,6 +134,37 @@ class Annotation {
       cornerRadius: cornerRadius,
       constrained: constrained,
       controlPoints: updated,
+      points: points,
+    );
+  }
+
+  /// Returns a copy with [point] appended to the freehand path.
+  Annotation appendPoint(Offset point) {
+    return Annotation(
+      type: type,
+      start: start,
+      end: point,
+      color: color,
+      strokeWidth: strokeWidth,
+      cornerRadius: cornerRadius,
+      constrained: constrained,
+      controlPoints: controlPoints,
+      points: [...points, point],
+    );
+  }
+
+  /// Returns a copy with the given simplified [newPoints] list.
+  Annotation withPoints(List<Offset> newPoints) {
+    return Annotation(
+      type: type,
+      start: start,
+      end: end,
+      color: color,
+      strokeWidth: strokeWidth,
+      cornerRadius: cornerRadius,
+      constrained: constrained,
+      controlPoints: controlPoints,
+      points: newPoints,
     );
   }
 }

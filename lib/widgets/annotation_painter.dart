@@ -75,6 +75,12 @@ class AnnotationPainter extends CustomPainter {
         } else {
           _drawCurvedArrow(canvas, annotation, paint);
         }
+
+      case ShapeType.pencil:
+        _drawPolyline(canvas, annotation, paint);
+
+      case ShapeType.marker:
+        _drawMarker(canvas, annotation, paint);
     }
   }
 
@@ -179,7 +185,57 @@ class AnnotationPainter extends CustomPainter {
     canvas.drawPath(path, Paint()..color = paint.color);
   }
 
+  static Path? _polylinePath(Annotation a) {
+    final pts = a.points;
+    if (pts.length < 2) return null;
+    final path = Path()..moveTo(pts[0].dx, pts[0].dy);
+    for (int i = 1; i < pts.length; i++) {
+      path.lineTo(pts[i].dx, pts[i].dy);
+    }
+    return path;
+  }
+
+  void _drawPolyline(Canvas canvas, Annotation a, Paint paint) {
+    final path = _polylinePath(a);
+    if (path != null) canvas.drawPath(path, paint);
+  }
+
+  void _drawMarker(Canvas canvas, Annotation a, Paint paint) {
+    final path = _polylinePath(a);
+    if (path == null) return;
+    // saveLayer with ~40% opacity prevents overlapping stroke from self-darkening.
+    canvas.saveLayer(
+      null,
+      Paint()..color = Color.fromARGB((a.color.a * 0.4 * 255).round(), 0, 0, 0),
+    );
+    canvas.drawPath(
+      path,
+      paint
+        ..color = a.color.withValues(alpha: 1.0)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.restore();
+  }
+
+  void _drawFreehandSelectionBox(Canvas canvas, Annotation annotation) {
+    final rect = annotation.boundingRect;
+    if (rect.isEmpty) return;
+    // Expand slightly so the box doesn't sit right on the stroke.
+    final expanded = rect.inflate(annotation.strokeWidth / 2 + 4);
+    final dashPaint = Paint()
+      ..color = annotation.color.withValues(alpha: 0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    canvas.drawRect(expanded, dashPaint);
+  }
+
   void _drawSelectionHandles(Canvas canvas, Annotation annotation) {
+    // Freehand types get a bounding box highlight instead of handles.
+    if (annotation.isFreehand) {
+      _drawFreehandSelectionBox(canvas, annotation);
+      return;
+    }
     final handles = annotationHandles(annotation);
     final handleRadius = max(4.0, annotation.strokeWidth * 0.6);
     for (final handle in handles) {

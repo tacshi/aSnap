@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../models/annotation.dart';
 import '../state/annotation_state.dart';
 import '../state/app_state.dart';
 import '../widgets/annotation_overlay.dart';
@@ -36,9 +37,9 @@ class _PreviewScreenState extends State<PreviewScreen> {
   final _scrollController = ScrollController();
   bool _focusRetryRunning = false;
 
-  bool _shapesActive = false;
+  ShapeType? _activeShapeType;
   bool _popoverVisible = false;
-  final _shapesLayerLink = LayerLink();
+  final _settingsLayerLink = LayerLink();
   OverlayEntry? _popoverEntry;
 
   /// Tracks the last image to detect capture changes and reset annotation UI.
@@ -83,19 +84,29 @@ class _PreviewScreenState extends State<PreviewScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // Shapes popover
+  // Tool selection & settings popover
   // ---------------------------------------------------------------------------
 
-  void _toggleShapes() {
+  /// Handles tapping a tool button in the toolbar.
+  ///
+  /// - First tap on an inactive tool: activates it and shows settings popover.
+  /// - Tap on the already active tool: toggles the settings popover.
+  /// - Tap on a different tool while one is active: switches tool, shows popover.
+  void _handleToolTap(ShapeType type) {
     setState(() {
-      if (!_shapesActive) {
-        _shapesActive = true;
-        _showPopover();
-      } else if (_popoverVisible) {
-        _removePopover();
-        _shapesActive = false;
+      if (_activeShapeType == type) {
+        // Same tool tapped — toggle popover visibility.
+        if (_popoverVisible) {
+          _removePopover();
+        } else {
+          _showPopover();
+        }
       } else {
-        // Mode active but popover dismissed → re-show settings.
+        // Different tool (or no tool active) — activate and show popover.
+        _activeShapeType = type;
+        widget.annotationState.updateSettings(
+          widget.annotationState.settings.copyWith(shapeType: type),
+        );
         _showPopover();
       }
     });
@@ -109,7 +120,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
         children: [
           ShapePopover(
             annotationState: widget.annotationState,
-            layerLink: _shapesLayerLink,
+            layerLink: _settingsLayerLink,
             onDismiss: () {
               _removePopover();
               _popoverVisible = false;
@@ -176,8 +187,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
         _removePopover();
         return true;
       }
-      if (_shapesActive) {
-        setState(() => _shapesActive = false);
+      if (_activeShapeType != null) {
+        setState(() => _activeShapeType = null);
         return true;
       }
       widget.onDiscard();
@@ -204,7 +215,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
         // Reset annotation UI when the image changes (new capture).
         if (_lastImage != null && !identical(image, _lastImage)) {
           _removePopover();
-          _shapesActive = false;
+          _activeShapeType = null;
         }
         _lastImage = image;
 
@@ -239,7 +250,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
           fit: StackFit.expand,
           children: [
             // Window drag area (only when NOT drawing).
-            if (!_shapesActive) DragToMoveArea(child: const SizedBox.expand()),
+            if (_activeShapeType == null)
+              DragToMoveArea(child: const SizedBox.expand()),
 
             // Screenshot image.
             RawImage(image: image, fit: BoxFit.contain),
@@ -249,7 +261,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
               annotationState: widget.annotationState,
               imageDisplayRect: imageDisplayRect,
               imagePixelSize: imageSize,
-              enabled: _shapesActive,
+              enabled: _activeShapeType != null,
             ),
 
             // Toolbar.
@@ -262,14 +274,14 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   onCopy: widget.onCopy,
                   onSave: widget.onSave,
                   onDiscard: widget.onDiscard,
-                  onShapesToggle: _toggleShapes,
-                  shapesActive: _shapesActive,
+                  onToolTap: _handleToolTap,
+                  activeShapeType: _activeShapeType,
                   hasAnnotations: widget.annotationState.hasAnnotations,
                   canUndo: widget.annotationState.canUndo,
                   canRedo: widget.annotationState.canRedo,
                   onUndo: widget.annotationState.undo,
                   onRedo: widget.annotationState.redo,
-                  shapesLayerLink: _shapesLayerLink,
+                  settingsLayerLink: _settingsLayerLink,
                 ),
               ),
             ),
@@ -311,13 +323,13 @@ class _PreviewScreenState extends State<PreviewScreen> {
             ),
 
             // Annotation overlay — outside the scroll view.
-            // When shapes active: opaque blocks drag-to-scroll, forwards
+            // When a tool is active: opaque blocks drag-to-scroll, forwards
             // trackpad scroll to controller. When inactive: IgnorePointer
             // lets all events through to the scroll view while still
             // rendering committed annotations.
             Positioned.fill(
               child: IgnorePointer(
-                ignoring: !_shapesActive,
+                ignoring: _activeShapeType == null,
                 child: ListenableBuilder(
                   listenable: Listenable.merge([
                     _scrollController,
@@ -333,11 +345,12 @@ class _PreviewScreenState extends State<PreviewScreen> {
                       constraints.maxWidth,
                       imageHeight,
                     );
+                    final toolActive = _activeShapeType != null;
                     return Listener(
-                      behavior: _shapesActive
+                      behavior: toolActive
                           ? HitTestBehavior.opaque
                           : HitTestBehavior.translucent,
-                      onPointerSignal: _shapesActive
+                      onPointerSignal: toolActive
                           ? (event) {
                               // Forward trackpad scroll to the scroll view.
                               if (event is PointerScrollEvent &&
@@ -356,7 +369,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                         annotationState: widget.annotationState,
                         imageDisplayRect: imageDisplayRect,
                         imagePixelSize: imagePixelSize,
-                        enabled: _shapesActive,
+                        enabled: toolActive,
                       ),
                     );
                   },
@@ -382,14 +395,14 @@ class _PreviewScreenState extends State<PreviewScreen> {
                     onCopy: widget.onCopy,
                     onSave: widget.onSave,
                     onDiscard: widget.onDiscard,
-                    onShapesToggle: _toggleShapes,
-                    shapesActive: _shapesActive,
+                    onToolTap: _handleToolTap,
+                    activeShapeType: _activeShapeType,
                     hasAnnotations: widget.annotationState.hasAnnotations,
                     canUndo: widget.annotationState.canUndo,
                     canRedo: widget.annotationState.canRedo,
                     onUndo: widget.annotationState.undo,
                     onRedo: widget.annotationState.redo,
-                    shapesLayerLink: _shapesLayerLink,
+                    settingsLayerLink: _settingsLayerLink,
                   ),
                 ),
               ),

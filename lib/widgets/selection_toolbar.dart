@@ -1,38 +1,45 @@
 import 'package:flutter/material.dart';
 
+import '../models/annotation.dart';
+
 /// Compact toolbar for the region selection overlay.
 ///
-/// Displays annotation tools (Shapes, Undo, Redo) and action buttons
-/// (Copy, Save, Close) in a dark pill-shaped container.
+/// Displays individual annotation tool buttons (Rectangle, Ellipse, Arrow,
+/// Line, Pencil, Marker), Undo/Redo, and action buttons (Copy, Save, Close)
+/// in a dark pill-shaped container.
 /// Positioned by the parent via [Positioned] in a [Stack].
 class SelectionToolbar extends StatelessWidget {
   final VoidCallback onCopy;
   final VoidCallback onSave;
   final VoidCallback onClose;
-  final VoidCallback? onShapesToggle;
+
+  /// Called when a tool button is tapped. Null disables all tool buttons.
+  final ValueChanged<ShapeType>? onToolTap;
   final VoidCallback? onUndo;
   final VoidCallback? onRedo;
-  final bool shapesActive;
+
+  /// The currently active shape type, or null if no tool is active.
+  final ShapeType? activeShapeType;
   final bool hasAnnotations;
   final bool canUndo;
   final bool canRedo;
 
-  /// Layer link for anchoring the shape popover above the shapes button.
-  final LayerLink? shapesLayerLink;
+  /// Layer link for anchoring the settings popover above the active tool.
+  final LayerLink? settingsLayerLink;
 
   const SelectionToolbar({
     super.key,
     required this.onCopy,
     required this.onSave,
     required this.onClose,
-    this.onShapesToggle,
+    this.onToolTap,
     this.onUndo,
     this.onRedo,
-    this.shapesActive = false,
+    this.activeShapeType,
     this.hasAnnotations = false,
     this.canUndo = false,
     this.canRedo = false,
-    this.shapesLayerLink,
+    this.settingsLayerLink,
   });
 
   @override
@@ -53,17 +60,9 @@ class SelectionToolbar extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // --- Annotation tools (left side) ---
-          if (onShapesToggle != null) ...[
-            CompositedTransformTarget(
-              link: shapesLayerLink ?? LayerLink(),
-              child: _ActionButton(
-                icon: Icons.edit_rounded,
-                label: 'Shapes',
-                onPressed: onShapesToggle!,
-                isActive: shapesActive,
-              ),
-            ),
+          // --- Annotation tool buttons (left side) ---
+          if (onToolTap != null) ...[
+            ..._buildToolButtons(),
             if (hasAnnotations) ...[
               const SizedBox(width: 4),
               _ActionButton(
@@ -109,6 +108,39 @@ class SelectionToolbar extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  List<Widget> _buildToolButtons() {
+    const tools = [
+      (ShapeType.rectangle, Icons.rectangle_outlined, 'Rectangle'),
+      (ShapeType.ellipse, Icons.circle_outlined, 'Ellipse'),
+      (ShapeType.arrow, Icons.arrow_right_alt_rounded, 'Arrow'),
+      (ShapeType.line, Icons.horizontal_rule_rounded, 'Line'),
+      (ShapeType.pencil, Icons.edit_outlined, 'Pencil'),
+      (ShapeType.marker, Icons.brush_outlined, 'Marker'),
+    ];
+
+    final widgets = <Widget>[];
+    for (var i = 0; i < tools.length; i++) {
+      if (i > 0) widgets.add(const SizedBox(width: 2));
+      final (type, icon, label) = tools[i];
+      final isActive = activeShapeType == type;
+      Widget button = _ActionButton(
+        icon: icon,
+        label: label,
+        onPressed: () => onToolTap!(type),
+        isActive: isActive,
+      );
+      // Anchor the settings popover to the active tool button.
+      if (isActive && settingsLayerLink != null) {
+        button = CompositedTransformTarget(
+          link: settingsLayerLink!,
+          child: button,
+        );
+      }
+      widgets.add(button);
+    }
+    return widgets;
   }
 }
 
