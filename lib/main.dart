@@ -13,7 +13,9 @@ import 'services/hotkey_service.dart';
 import 'services/scroll_capture_service.dart';
 import 'services/tray_service.dart';
 import 'services/window_service.dart';
+import 'state/annotation_state.dart';
 import 'state/app_state.dart';
+import 'utils/annotation_compositor.dart';
 
 bool _displayChangeInProgress = false;
 bool _displayChangePending = false;
@@ -50,6 +52,7 @@ List<Rect> _globalRectsToLocal(Offset screenOrigin) {
 }
 
 late final AppState _appState;
+late final AnnotationState _annotationState;
 late final CaptureService _captureService;
 late final ClipboardService _clipboardService;
 late final FileService _fileService;
@@ -62,6 +65,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   _appState = AppState();
+  _annotationState = AnnotationState();
   _captureService = CaptureService();
   _clipboardService = ClipboardService();
   _fileService = FileService();
@@ -75,6 +79,7 @@ void main() async {
   runApp(
     ASnapApp(
       appState: _appState,
+      annotationState: _annotationState,
       onCopy: _handleCopy,
       onSave: _handleSave,
       onDiscard: _handleDiscard,
@@ -218,7 +223,9 @@ Future<void> _showPreviewWithImage(
   // setCapturedImage() happens before the window is visible. Rebuild once more
   // after show/focus so PreviewScreen can re-run focus sync reliably.
   _appState.nudge();
-  await _windowService.startEscMonitor();
+  // No native Esc monitor for captured state — PreviewScreen uses
+  // HardwareKeyboard for focus-independent Escape handling (supports
+  // unwinding shapes mode before dismiss).
 }
 
 /// Real-time AX hit-test: convert local overlay coordinates to global CG
@@ -517,9 +524,10 @@ Future<void> _handleRegionSelected(Rect logicalRect) async {
       _appState.setCapturedImage(cropped);
       await _windowService.showPreviewInPlace(selectionRect: logicalRect);
       // Window is resized/focused after setCapturedImage(); force another
-      // rebuild so KeyboardListener focus sync runs with the visible window.
+      // rebuild so focus sync runs with the visible window.
       _appState.nudge();
-      await _windowService.startEscMonitor();
+      // No native Esc monitor — PreviewScreen handles Escape via
+      // HardwareKeyboard (supports shapes mode unwinding).
     }
   } else {
     _appState.clear();
@@ -550,23 +558,32 @@ Future<void> _handleRegionCopy(Rect logicalRect) async {
     logicalRect.bottom * scaleY,
   );
 
+  // Capture annotation state before clearing.
+  final annotations = _annotationState.annotations;
+
   // Detach the image so clear() won't dispose it — we need it for cropping.
   _appState.detachDecodedFullScreen();
 
   // Hide FIRST — user perceives instant dismiss.
   await _windowService.hidePreview();
   _appState.clear();
+  _annotationState.clear();
   _clearDisplayCaches();
   unawaited(_windowService.stopEscMonitor());
   unawaited(_windowService.suspendOverlay());
   unawaited(_windowService.startRectPolling());
 
   // Expensive work after the window is gone.
-  final cropped = await _captureService.cropImage(
+  var cropped = await _captureService.cropImage(
     decodedFullScreen,
     physicalRect,
   );
   if (cropped != null) {
+    if (annotations.isNotEmpty) {
+      final composited = await compositeAnnotations(cropped, annotations);
+      cropped.dispose();
+      cropped = composited;
+    }
     final byteData = await cropped.toByteData(format: ui.ImageByteFormat.png);
     if (byteData != null) {
       await _clipboardService.copyImage(byteData.buffer.asUint8List());
@@ -604,23 +621,32 @@ Future<void> _handleRegionSave(Rect logicalRect) async {
     logicalRect.bottom * scaleY,
   );
 
+  // Capture annotation state before clearing.
+  final annotations = _annotationState.annotations;
+
   // Detach the image so clear() won't dispose it — we need it for cropping.
   _appState.detachDecodedFullScreen();
 
   // Hide overlay instantly — user perceives instant dismiss after save dialog.
   await _windowService.hidePreview();
   _appState.clear();
+  _annotationState.clear();
   _clearDisplayCaches();
   unawaited(_windowService.stopEscMonitor());
   unawaited(_windowService.cleanupOverlay());
   unawaited(_windowService.startRectPolling());
 
   // Expensive crop + encode + write after the window is gone.
-  final cropped = await _captureService.cropImage(
+  var cropped = await _captureService.cropImage(
     decodedFullScreen,
     physicalRect,
   );
   if (cropped != null) {
+    if (annotations.isNotEmpty) {
+      final composited = await compositeAnnotations(cropped, annotations);
+      cropped.dispose();
+      cropped = composited;
+    }
     final byteData = await cropped.toByteData(format: ui.ImageByteFormat.png);
     if (byteData != null) {
       await _fileService.saveToPath(savePath, byteData.buffer.asUint8List());
@@ -634,6 +660,7 @@ Future<void> _handleRegionCancel() async {
   // Hide window BEFORE clearing state — instant dismiss.
   await _windowService.hidePreview();
   _appState.clear();
+  _annotationState.clear();
   _clearDisplayCaches();
   // Intentionally defer overlay cleanup to the next show transition.
   // Immediate cleanup here can cause a visible flash on close.
@@ -645,15 +672,23 @@ Future<void> _handleCopy() async {
   _escActionInProgress = false;
   // Detach image so clear() won't dispose it.
   final image = _appState.detachCapturedImage();
+  final annotations = _annotationState.annotations;
   // Hide window BEFORE clearing state.
   await _windowService.hidePreview();
   _appState.clear();
+  _annotationState.clear();
   // Encode + copy after window is gone — user perceives instant dismiss.
   if (image != null) {
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    final finalImage = annotations.isNotEmpty
+        ? await compositeAnnotations(image, annotations)
+        : image;
+    final byteData = await finalImage.toByteData(
+      format: ui.ImageByteFormat.png,
+    );
     if (byteData != null) {
       await _clipboardService.copyImage(byteData.buffer.asUint8List());
     }
+    if (!identical(finalImage, image)) finalImage.dispose();
     image.dispose();
   }
   _clearDisplayCaches();
@@ -663,15 +698,28 @@ Future<void> _handleCopy() async {
 
 Future<void> _handleSave() async {
   _escActionInProgress = false;
-  // Encode while the preview is still visible — the image stays on screen
-  // behind the NSSavePanel so the user sees what they're saving.
-  final pngBytes = await _appState.capturedImageAsPng();
-  if (pngBytes != null) {
-    await _fileService.saveScreenshot(pngBytes);
+  // Composite annotations if any, then encode.
+  final image = _appState.capturedImage;
+  final annotations = _annotationState.annotations;
+  if (image != null && annotations.isNotEmpty) {
+    final composited = await compositeAnnotations(image, annotations);
+    final byteData = await composited.toByteData(
+      format: ui.ImageByteFormat.png,
+    );
+    if (byteData != null) {
+      await _fileService.saveScreenshot(byteData.buffer.asUint8List());
+    }
+    composited.dispose();
+  } else {
+    final pngBytes = await _appState.capturedImageAsPng();
+    if (pngBytes != null) {
+      await _fileService.saveScreenshot(pngBytes);
+    }
   }
   // Save dialog closed — now hide + clear.
   await _windowService.hidePreview();
   _appState.clear();
+  _annotationState.clear();
   _clearDisplayCaches();
   unawaited(_windowService.stopEscMonitor());
   unawaited(_windowService.startRectPolling());
@@ -682,6 +730,7 @@ Future<void> _handleDiscard() async {
   // Hide window BEFORE clearing state.
   await _windowService.hidePreview();
   _appState.clear();
+  _annotationState.clear();
   // Non-blocking cleanup after window is gone.
   _clearDisplayCaches();
   unawaited(_windowService.stopEscMonitor());
@@ -888,7 +937,8 @@ Future<void> _handleScrollFinish() async {
       screenOrigin: screenOrigin,
     );
     _appState.nudge();
-    await _windowService.startEscMonitor();
+    // No native Esc monitor — PreviewScreen handles Escape via
+    // HardwareKeyboard (supports shapes mode unwinding).
   } else {
     _appState.clear();
     await _windowService.hidePreview();

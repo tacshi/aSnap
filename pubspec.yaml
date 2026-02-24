@@ -34,6 +34,9 @@ dependencies:
   # Native save-file dialog
   file_selector: ^1.0.0
 
+  # Color picker for annotation tools
+  flutter_colorpicker: ^1.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

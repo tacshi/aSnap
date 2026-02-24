@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'screens/preview_screen.dart';
 import 'screens/region_selection_screen.dart';
+import 'state/annotation_state.dart';
 import 'state/app_state.dart';
 import 'widgets/scroll_progress_badge.dart';
 
 class ASnapApp extends StatelessWidget {
   final AppState appState;
+  final AnnotationState annotationState;
   final VoidCallback onCopy;
   final VoidCallback onSave;
   final VoidCallback onDiscard;
@@ -24,6 +26,7 @@ class ASnapApp extends StatelessWidget {
   const ASnapApp({
     super.key,
     required this.appState,
+    required this.annotationState,
     required this.onCopy,
     required this.onSave,
     required this.onDiscard,
@@ -61,6 +64,7 @@ class ASnapApp extends StatelessWidget {
               onCopy: onRegionCopy,
               onSave: onRegionSave,
               onHitTest: onHitTest,
+              annotationState: annotationState,
             );
           }
           if (appState.status == CaptureStatus.scrollSelecting &&
@@ -87,6 +91,7 @@ class ASnapApp extends StatelessWidget {
           }
           return PreviewScreen(
             appState: appState,
+            annotationState: annotationState,
             onCopy: onCopy,
             onSave: onSave,
             onDiscard: onDiscard,
