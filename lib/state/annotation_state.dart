@@ -353,8 +353,10 @@ class AnnotationState extends ChangeNotifier {
     _preEditSnapshot = null;
     // Skip history push if the selected annotation didn't actually change.
     final i = _selectedIndex;
-    if (i != null && i < current.length && i < before.length &&
-        identical(current[i], before[i])) {
+    if (i != null &&
+        i < current.length &&
+        i < before.length &&
+        current[i] == before[i]) {
       return;
     }
     _commitSnapshot(current);

@@ -144,6 +144,10 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
   }
 
   Offset _widgetToImage(Offset widgetPoint) {
+    if (widget.imageDisplayRect.width == 0 ||
+        widget.imageDisplayRect.height == 0) {
+      return Offset.zero;
+    }
     final scaleX = widget.imagePixelSize.width / widget.imageDisplayRect.width;
     final scaleY =
         widget.imagePixelSize.height / widget.imageDisplayRect.height;
@@ -154,6 +158,9 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
   }
 
   Offset _imageToWidget(Offset imagePoint) {
+    if (widget.imagePixelSize.width == 0 || widget.imagePixelSize.height == 0) {
+      return Offset.zero;
+    }
     final scaleX = widget.imageDisplayRect.width / widget.imagePixelSize.width;
     final scaleY =
         widget.imageDisplayRect.height / widget.imagePixelSize.height;
@@ -189,11 +196,14 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
 
     // 1. ALWAYS record timing for double-click detection.
     final now = DateTime.now();
+    final zoomScale =
+        widget.imagePixelSize.width / widget.imageDisplayRect.width;
+    final doubleClickThreshold = 10.0 * zoomScale;
     final isDoubleClick =
         _lastPointerDown != null &&
         _lastPointerDownPos != null &&
         now.difference(_lastPointerDown!) < const Duration(milliseconds: 400) &&
-        (imagePoint - _lastPointerDownPos!).distance < 10;
+        (imagePoint - _lastPointerDownPos!).distance < doubleClickThreshold;
     _lastPointerDown = now;
     _lastPointerDownPos = imagePoint;
 

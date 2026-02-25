@@ -5,12 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../models/annotation.dart';
 import '../state/annotation_state.dart';
 import '../state/app_state.dart';
 import '../widgets/annotation_overlay.dart';
 import '../widgets/selection_toolbar.dart';
-import '../widgets/shape_popover.dart';
+import '../widgets/tool_popover_mixin.dart';
 
 class PreviewScreen extends StatefulWidget {
   final AppState appState;
@@ -32,18 +31,21 @@ class PreviewScreen extends StatefulWidget {
   State<PreviewScreen> createState() => _PreviewScreenState();
 }
 
-class _PreviewScreenState extends State<PreviewScreen> {
+class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
   final _focusNode = FocusNode();
   final _scrollController = ScrollController();
   bool _focusRetryRunning = false;
 
-  ShapeType? _activeShapeType;
-  bool _popoverVisible = false;
-  OverlayEntry? _popoverEntry;
-  final _popoverAnchor = LayerLink();
+  final _popoverAnchorLink = LayerLink();
 
   /// Tracks the last image to detect capture changes and reset annotation UI.
   ui.Image? _lastImage;
+
+  @override
+  AnnotationState get popoverAnnotationState => widget.annotationState;
+
+  @override
+  LayerLink get popoverAnchor => _popoverAnchorLink;
 
   @override
   void initState() {
@@ -57,7 +59,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
-    _removePopover();
+    removePopover();
     _scrollController.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -81,65 +83,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
       if (_focusNode.hasFocus) return;
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Tool selection & settings popover
-  // ---------------------------------------------------------------------------
-
-  /// Handles tapping a tool button in the toolbar.
-  ///
-  /// - First tap on an inactive tool: activates it and shows settings popover.
-  /// - Tap on the already active tool: toggles the settings popover.
-  /// - Tap on a different tool while one is active: switches tool, shows popover.
-  void _handleToolTap(ShapeType type) {
-    setState(() {
-      if (_activeShapeType == type) {
-        // Same tool tapped — toggle popover visibility.
-        if (_popoverVisible) {
-          _removePopover();
-        } else {
-          _showPopover();
-        }
-      } else {
-        // Different tool (or no tool active) — activate and show popover.
-        _activeShapeType = type;
-        widget.annotationState.updateSettings(
-          widget.annotationState.settings.copyWith(shapeType: type),
-        );
-        _showPopover();
-      }
-    });
-  }
-
-  void _showPopover() {
-    _removePopover();
-    _popoverVisible = true;
-    _popoverEntry = OverlayEntry(
-      builder: (_) => CompositedTransformFollower(
-        link: _popoverAnchor,
-        targetAnchor: Alignment.topCenter,
-        followerAnchor: Alignment.bottomCenter,
-        offset: const Offset(0, -8),
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: ShapePopover(
-            annotationState: widget.annotationState,
-            onDismiss: () {
-              _removePopover();
-              _popoverVisible = false;
-            },
-          ),
-        ),
-      ),
-    );
-    Overlay.of(context).insert(_popoverEntry!);
-  }
-
-  void _removePopover() {
-    _popoverEntry?.remove();
-    _popoverEntry = null;
-    _popoverVisible = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -194,12 +137,12 @@ class _PreviewScreenState extends State<PreviewScreen> {
         widget.annotationState.cancelTextEdit();
         return true;
       }
-      if (_popoverVisible) {
-        _removePopover();
+      if (popoverVisible) {
+        removePopover();
         return true;
       }
-      if (_activeShapeType != null) {
-        setState(() => _activeShapeType = null);
+      if (activeShapeType != null) {
+        setState(() => activeShapeType = null);
         return true;
       }
       widget.onDiscard();
@@ -225,8 +168,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
         // Reset annotation UI when the image changes (new capture).
         if (_lastImage != null && !identical(image, _lastImage)) {
-          _removePopover();
-          _activeShapeType = null;
+          removePopover();
+          activeShapeType = null;
         }
         _lastImage = image;
 
@@ -261,7 +204,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
           fit: StackFit.expand,
           children: [
             // Window drag area (only when NOT drawing).
-            if (_activeShapeType == null)
+            if (activeShapeType == null)
               DragToMoveArea(child: const SizedBox.expand()),
 
             // Screenshot image.
@@ -272,7 +215,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
               annotationState: widget.annotationState,
               imageDisplayRect: imageDisplayRect,
               imagePixelSize: imageSize,
-              enabled: _activeShapeType != null,
+              enabled: activeShapeType != null,
               sourceImage: image,
             ),
 
@@ -288,14 +231,14 @@ class _PreviewScreenState extends State<PreviewScreen> {
                     onCopy: widget.onCopy,
                     onSave: widget.onSave,
                     onClose: widget.onDiscard,
-                    onToolTap: _handleToolTap,
+                    onToolTap: handleToolTap,
                     onUndo: widget.annotationState.undo,
                     onRedo: widget.annotationState.redo,
-                    activeShapeType: _activeShapeType,
+                    activeShapeType: activeShapeType,
                     hasAnnotations: widget.annotationState.hasAnnotations,
                     canUndo: widget.annotationState.canUndo,
                     canRedo: widget.annotationState.canRedo,
-                    settingsLayerLink: _popoverAnchor,
+                    settingsLayerLink: _popoverAnchorLink,
                   ),
                 ),
               ),
@@ -344,7 +287,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
             // rendering committed annotations.
             Positioned.fill(
               child: IgnorePointer(
-                ignoring: _activeShapeType == null,
+                ignoring: activeShapeType == null,
                 child: ListenableBuilder(
                   listenable: Listenable.merge([
                     _scrollController,
@@ -360,7 +303,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                       constraints.maxWidth,
                       imageHeight,
                     );
-                    final toolActive = _activeShapeType != null;
+                    final toolActive = activeShapeType != null;
                     return Listener(
                       behavior: toolActive
                           ? HitTestBehavior.opaque
@@ -405,14 +348,14 @@ class _PreviewScreenState extends State<PreviewScreen> {
                     onCopy: widget.onCopy,
                     onSave: widget.onSave,
                     onClose: widget.onDiscard,
-                    onToolTap: _handleToolTap,
+                    onToolTap: handleToolTap,
                     onUndo: widget.annotationState.undo,
                     onRedo: widget.annotationState.redo,
-                    activeShapeType: _activeShapeType,
+                    activeShapeType: activeShapeType,
                     hasAnnotations: widget.annotationState.hasAnnotations,
                     canUndo: widget.annotationState.canUndo,
                     canRedo: widget.annotationState.canRedo,
-                    settingsLayerLink: _popoverAnchor,
+                    settingsLayerLink: _popoverAnchorLink,
                   ),
                 ),
               ),

@@ -313,7 +313,14 @@ class AnnotationPainter extends CustomPainter {
                   .toInt();
               canvas.drawRect(
                 blockRect,
-                Paint()..color = _samplePixel(pixels, imgW, cx, cy),
+                Paint()
+                  ..color = _samplePixel(
+                    pixels,
+                    imgW,
+                    sourceImage!.height,
+                    cx,
+                    cy,
+                  ),
               );
             }
           }
@@ -323,7 +330,16 @@ class AnnotationPainter extends CustomPainter {
   }
 
   /// Read one pixel from raw RGBA [ByteData].
-  static Color _samplePixel(ByteData pixels, int imageWidth, int x, int y) {
+  static Color _samplePixel(
+    ByteData pixels,
+    int imageWidth,
+    int imageHeight,
+    int x,
+    int y,
+  ) {
+    if (x < 0 || x >= imageWidth || y < 0 || y >= imageHeight) {
+      return const Color(0x00000000); // transparent fallback
+    }
     final offset = (y * imageWidth + x) * 4;
     return Color.fromARGB(
       pixels.getUint8(offset + 3),
@@ -333,6 +349,8 @@ class AnnotationPainter extends CustomPainter {
     );
   }
 
+  // Note: TextPainter is created per paint call. For canvases with many
+  // stamps/text annotations, consider caching TextPainters externally.
   void _drawNumberStamp(Canvas canvas, Annotation a) {
     final radius = a.stampRadius;
     final center = a.start;
@@ -369,6 +387,8 @@ class AnnotationPainter extends CustomPainter {
     );
   }
 
+  // Note: TextPainter is created per paint call. For canvases with many
+  // stamps/text annotations, consider caching TextPainters externally.
   void _drawText(Canvas canvas, Annotation a) {
     final content = a.text;
     if (content == null || content.isEmpty) return;

@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
+
 /// The mosaic/blur mode for mosaic annotations.
 enum MosaicMode { pixelate, blur, solidColor }
 
@@ -113,191 +115,131 @@ class Annotation {
     return Rect.fromPoints(start, end);
   }
 
-  Annotation withEnd(Offset newEnd) => Annotation(
-    type: type,
-    start: start,
-    end: newEnd,
-    color: color,
-    strokeWidth: strokeWidth,
-    cornerRadius: cornerRadius,
-    constrained: constrained,
-    controlPoints: controlPoints,
-    points: points,
-    label: label,
-    text: text,
-    fontFamily: fontFamily,
-    mosaicMode: mosaicMode,
-  );
+  // ---------------------------------------------------------------------------
+  // copyWith
+  // ---------------------------------------------------------------------------
 
-  Annotation withConstrained(bool value) => Annotation(
-    type: type,
-    start: start,
-    end: end,
-    color: color,
-    strokeWidth: strokeWidth,
-    cornerRadius: cornerRadius,
-    constrained: value,
-    controlPoints: controlPoints,
-    points: points,
-    label: label,
-    text: text,
-    fontFamily: fontFamily,
-    mosaicMode: mosaicMode,
-  );
+  /// Returns a copy with any subset of fields overridden.
+  Annotation copyWith({
+    ShapeType? type,
+    Offset? start,
+    Offset? end,
+    Color? color,
+    double? strokeWidth,
+    double? cornerRadius,
+    bool? constrained,
+    List<Offset>? controlPoints,
+    List<Offset>? points,
+    int? label,
+    String? text,
+    String? fontFamily,
+    MosaicMode? mosaicMode,
+  }) {
+    return Annotation(
+      type: type ?? this.type,
+      start: start ?? this.start,
+      end: end ?? this.end,
+      color: color ?? this.color,
+      strokeWidth: strokeWidth ?? this.strokeWidth,
+      cornerRadius: cornerRadius ?? this.cornerRadius,
+      constrained: constrained ?? this.constrained,
+      controlPoints: controlPoints ?? this.controlPoints,
+      points: points ?? this.points,
+      label: label ?? this.label,
+      text: text ?? this.text,
+      fontFamily: fontFamily ?? this.fontFamily,
+      mosaicMode: mosaicMode ?? this.mosaicMode,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Convenience copy methods
+  // ---------------------------------------------------------------------------
+
+  Annotation withEnd(Offset newEnd) => copyWith(end: newEnd);
+
+  Annotation withConstrained(bool value) => copyWith(constrained: value);
 
   /// Returns a copy with the control point at [index] replaced by [point].
   Annotation withControlPoint(int index, Offset point) {
     final updated = [...controlPoints];
     updated[index] = point;
-    return Annotation(
-      type: type,
-      start: start,
-      end: end,
-      color: color,
-      strokeWidth: strokeWidth,
-      cornerRadius: cornerRadius,
-      constrained: constrained,
-      controlPoints: updated,
-      points: points,
-      label: label,
-      text: text,
-      fontFamily: fontFamily,
-      mosaicMode: mosaicMode,
-    );
+    return copyWith(controlPoints: updated);
   }
 
   /// Returns a copy with [point] appended (no-op if already at max of 2).
   Annotation addControlPoint(Offset point) {
     if (controlPoints.length >= 2) return this;
-    return Annotation(
-      type: type,
-      start: start,
-      end: end,
-      color: color,
-      strokeWidth: strokeWidth,
-      cornerRadius: cornerRadius,
-      constrained: constrained,
-      controlPoints: [...controlPoints, point],
-      points: points,
-      label: label,
-      text: text,
-      fontFamily: fontFamily,
-      mosaicMode: mosaicMode,
-    );
+    return copyWith(controlPoints: [...controlPoints, point]);
   }
 
   /// Returns a copy with the control point at [index] removed.
   Annotation removeControlPoint(int index) {
     final updated = [...controlPoints]..removeAt(index);
-    return Annotation(
-      type: type,
-      start: start,
-      end: end,
-      color: color,
-      strokeWidth: strokeWidth,
-      cornerRadius: cornerRadius,
-      constrained: constrained,
-      controlPoints: updated,
-      points: points,
-      label: label,
-      text: text,
-      fontFamily: fontFamily,
-      mosaicMode: mosaicMode,
-    );
+    return copyWith(controlPoints: updated);
   }
 
   /// Returns a copy with [point] appended to the freehand path.
   Annotation appendPoint(Offset point) {
-    return Annotation(
-      type: type,
-      start: start,
-      end: point,
-      color: color,
-      strokeWidth: strokeWidth,
-      cornerRadius: cornerRadius,
-      constrained: constrained,
-      controlPoints: controlPoints,
-      points: [...points, point],
-      label: label,
-      text: text,
-      fontFamily: fontFamily,
-      mosaicMode: mosaicMode,
-    );
+    return copyWith(end: point, points: [...points, point]);
   }
 
   /// Returns a copy with the given simplified [newPoints] list.
-  Annotation withPoints(List<Offset> newPoints) {
-    return Annotation(
-      type: type,
-      start: start,
-      end: end,
-      color: color,
-      strokeWidth: strokeWidth,
-      cornerRadius: cornerRadius,
-      constrained: constrained,
-      controlPoints: controlPoints,
-      points: newPoints,
-      label: label,
-      text: text,
-      fontFamily: fontFamily,
-      mosaicMode: mosaicMode,
-    );
-  }
+  Annotation withPoints(List<Offset> newPoints) => copyWith(points: newPoints);
 
   /// Returns a copy with the given [newText] content.
-  Annotation withText(String newText) {
-    return Annotation(
-      type: type,
-      start: start,
-      end: end,
-      color: color,
-      strokeWidth: strokeWidth,
-      cornerRadius: cornerRadius,
-      constrained: constrained,
-      controlPoints: controlPoints,
-      points: points,
-      label: label,
-      text: newText,
-      fontFamily: fontFamily,
-      mosaicMode: mosaicMode,
-    );
-  }
+  Annotation withText(String newText) => copyWith(text: newText);
 
   /// Returns a copy with the given [mode] for mosaic annotations.
-  Annotation withMosaicMode(MosaicMode mode) {
-    return Annotation(
-      type: type,
-      start: start,
-      end: end,
-      color: color,
-      strokeWidth: strokeWidth,
-      cornerRadius: cornerRadius,
-      constrained: constrained,
-      controlPoints: controlPoints,
-      points: points,
-      label: label,
-      text: text,
-      fontFamily: fontFamily,
-      mosaicMode: mode,
-    );
-  }
+  Annotation withMosaicMode(MosaicMode mode) => copyWith(mosaicMode: mode);
 
   /// Returns a copy with all positions shifted by [delta].
   Annotation translated(Offset delta) {
-    return Annotation(
-      type: type,
+    return copyWith(
       start: start + delta,
       end: end + delta,
-      color: color,
-      strokeWidth: strokeWidth,
-      cornerRadius: cornerRadius,
-      constrained: constrained,
       controlPoints: [for (final cp in controlPoints) cp + delta],
       points: [for (final p in points) p + delta],
-      label: label,
-      text: text,
-      fontFamily: fontFamily,
-      mosaicMode: mosaicMode,
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Equality
+  // ---------------------------------------------------------------------------
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! Annotation) return false;
+    return type == other.type &&
+        start == other.start &&
+        end == other.end &&
+        color == other.color &&
+        strokeWidth == other.strokeWidth &&
+        cornerRadius == other.cornerRadius &&
+        constrained == other.constrained &&
+        listEquals(controlPoints, other.controlPoints) &&
+        listEquals(points, other.points) &&
+        label == other.label &&
+        text == other.text &&
+        fontFamily == other.fontFamily &&
+        mosaicMode == other.mosaicMode;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    type,
+    start,
+    end,
+    color,
+    strokeWidth,
+    cornerRadius,
+    constrained,
+    Object.hashAll(controlPoints),
+    Object.hashAll(points),
+    label,
+    text,
+    fontFamily,
+    mosaicMode,
+  );
 }
