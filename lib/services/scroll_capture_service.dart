@@ -601,6 +601,7 @@ class ScrollCaptureService {
     int currBytesPerRow,
     int offset, {
     int skipTopRows = 0,
+    double bestSoFar = double.infinity,
   }) {
     if (prevWidth != currWidth) return double.infinity;
     if (offset <= 0 || offset >= prevHeight) return double.infinity;
@@ -614,6 +615,17 @@ class ScrollCaptureService {
     final effectiveLen = len - start;
     if (effectiveLen < 4) return double.infinity;
 
+    // Validate buffer sizes cover the rows we'll access.
+    // The last pixel index in the inner loop determines the worst-case offset.
+    final lastX = prevWidth > 1 ? (prevWidth - 1) ~/ 2 * 2 : 0;
+    if ((offset + len - 1) * prevBytesPerRow + lastX * 4 + 2 >=
+        prevBytes.length) {
+      return double.infinity;
+    }
+    if ((len - 1) * currBytesPerRow + lastX * 4 + 2 >= currBytes.length) {
+      return double.infinity;
+    }
+
     double totalDiff = 0;
     int sampleCount = 0;
 
@@ -624,13 +636,19 @@ class ScrollCaptureService {
       for (var x = 0; x < prevWidth; x += 2) {
         final pIdx = pRowOff + x * 4;
         final cIdx = cRowOff + x * 4;
-        if (pIdx + 2 >= prevBytes.length || cIdx + 2 >= currBytes.length) {
-          continue;
-        }
         totalDiff += (prevBytes[pIdx] - currBytes[cIdx]).abs(); // B
         totalDiff += (prevBytes[pIdx + 1] - currBytes[cIdx + 1]).abs(); // G
         totalDiff += (prevBytes[pIdx + 2] - currBytes[cIdx + 2]).abs(); // R
         sampleCount += 3;
+      }
+
+      // Early exit: if running MAD already exceeds best known, skip remaining rows.
+      // Only check after processing at least half the rows so the running MAD
+      // has stabilized (early rows near the header boundary can be noisy).
+      if (i >= start + (effectiveLen >> 1) &&
+          sampleCount > 0 &&
+          totalDiff / sampleCount > bestSoFar) {
+        return double.infinity;
       }
     }
 
@@ -759,6 +777,7 @@ class ScrollCaptureService {
           currBytesPerRow,
           off,
           skipTopRows: pinnedTopRows,
+          bestSoFar: bestRefDiff,
         );
         if (d < bestRefDiff) {
           bestRefDiff = d;

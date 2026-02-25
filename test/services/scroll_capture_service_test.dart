@@ -348,6 +348,67 @@ void main() {
       );
     });
 
+    test('bestSoFar causes early return when data is mismatched', () {
+      const width = 100;
+      const height = 100;
+      const scrollAmount = 20;
+      final frameA = _gradientFrame(width, height);
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
+
+      // Wrong offset produces a large diff
+      final diffNoBound = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        scrollAmount + 5,
+      );
+      expect(diffNoBound, greaterThan(1.0));
+
+      // With a tight bestSoFar, should return early with a value > bestSoFar
+      const bestSoFar = 0.5;
+      final diffBounded = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        scrollAmount + 5,
+        bestSoFar: bestSoFar,
+      );
+      expect(diffBounded, greaterThan(bestSoFar));
+    });
+
+    test('bestSoFar does not affect result when data matches well', () {
+      const width = 100;
+      const height = 100;
+      const scrollAmount = 20;
+      final frameA = _gradientFrame(width, height);
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
+
+      // Correct offset with generous bestSoFar should return near-zero diff
+      final diff = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        scrollAmount,
+        bestSoFar: 100.0,
+      );
+      expect(diff, closeTo(0, 0.01));
+    });
+
     test('offset out of bounds → infinity', () {
       final frame = _solidFrame(100, 50, 128, 128, 128);
       expect(
