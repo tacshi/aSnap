@@ -35,4 +35,4 @@ HotKey get kFullScreenHotkey => HotKey(
 // Scroll capture tuning constants
 const int kScrollMaxFrames = 150;
 const int kScrollTimeoutSeconds = 30;
-const int kScrollCaptureFps = 15;
+const int kScrollCaptureFps = 20;

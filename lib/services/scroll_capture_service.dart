@@ -49,6 +49,11 @@ class ScrollCaptureService {
   /// Column samples for the last stored frame (for overlap computation).
   List<List<double>>? _lastStoredCols;
 
+  /// Raw BGRA bytes of the last stored frame (for refinement pass).
+  Uint8List? _lastStoredBytes;
+  int _lastStoredWidth = 0;
+  int _lastStoredBytesPerRow = 0;
+
   /// Last computed scroll offset; used as prediction for faster search.
   int _predictedOffset = 0;
 
@@ -83,6 +88,9 @@ class ScrollCaptureService {
     _frames.clear();
     _prevBytes = null;
     _lastStoredCols = null;
+    _lastStoredBytes = null;
+    _lastStoredWidth = 0;
+    _lastStoredBytesPerRow = 0;
     _predictedOffset = 0;
     _runningImage?.dispose();
     _runningImage = null;
@@ -118,6 +126,9 @@ class ScrollCaptureService {
     _stopwatch?.stop();
     _prevBytes = null;
     _lastStoredCols = null;
+    _lastStoredBytes = null;
+    _lastStoredWidth = 0;
+    _lastStoredBytesPerRow = 0;
     _predictedOffset = 0;
     // Prefer the already-stitched live composite. This avoids a second heavy
     // full stitch pass when the user clicks Done and makes finishing instant.
@@ -203,6 +214,9 @@ class ScrollCaptureService {
           capture.pixelHeight,
           capture.bytesPerRow,
         );
+        _lastStoredBytes = capture.bytes;
+        _lastStoredWidth = capture.pixelWidth;
+        _lastStoredBytesPerRow = capture.bytesPerRow;
 
         await _updateRunningPreview(frame);
         onProgress?.call(_frames.length);
@@ -238,6 +252,12 @@ class ScrollCaptureService {
         currCols,
         _lastStoredHeight,
         capture.pixelHeight,
+        prevBytes: _lastStoredBytes,
+        prevWidth: _lastStoredWidth,
+        prevBytesPerRow: _lastStoredBytesPerRow,
+        currBytes: capture.bytes,
+        currWidth: capture.pixelWidth,
+        currBytesPerRow: capture.bytesPerRow,
       );
 
       // Always update prev for identity comparison
@@ -257,6 +277,9 @@ class ScrollCaptureService {
         );
         _lastStoredHeight = capture.pixelHeight;
         _lastStoredCols = currCols;
+        _lastStoredBytes = capture.bytes;
+        _lastStoredWidth = capture.pixelWidth;
+        _lastStoredBytesPerRow = capture.bytesPerRow;
         _predictedOffset = 0;
         _captureInProgress = false;
         return;
@@ -290,6 +313,9 @@ class ScrollCaptureService {
       // Update last stored frame reference
       _lastStoredHeight = capture.pixelHeight;
       _lastStoredCols = currCols;
+      _lastStoredBytes = capture.bytes;
+      _lastStoredWidth = capture.pixelWidth;
+      _lastStoredBytesPerRow = capture.bytesPerRow;
       _predictedOffset = capture.pixelHeight - overlap;
 
       await _updateRunningPreview(frame);
@@ -485,7 +511,7 @@ class ScrollCaptureService {
   /// Compute column samples for a frame: for each row, compute the grayscale
   /// value at [kColSamples] evenly-spaced columns across the full width.
   /// Returns a list of [height] entries, each with [kColSamples] doubles.
-  static const kColSamples = 10;
+  static const kColSamples = 24;
 
   @visibleForTesting
   static List<List<double>> columnSamples(
@@ -560,6 +586,75 @@ class ScrollCaptureService {
     return count > 0 && weightSum > 0 ? sum / weightSum : double.infinity;
   }
 
+  /// Full-pixel-row refinement: compute MAD between overlapping rows of two
+  /// raw BGRA frames for a given offset. Samples every 2nd pixel across the
+  /// full row width (~62x more data than 24-column sampling).
+  @visibleForTesting
+  static double fullRowDiff(
+    Uint8List prevBytes,
+    int prevWidth,
+    int prevHeight,
+    int prevBytesPerRow,
+    Uint8List currBytes,
+    int currWidth,
+    int currHeight,
+    int currBytesPerRow,
+    int offset, {
+    int skipTopRows = 0,
+    double bestSoFar = double.infinity,
+  }) {
+    if (prevWidth != currWidth) return double.infinity;
+    if (offset <= 0 || offset >= prevHeight) return double.infinity;
+
+    final len = (prevHeight - offset) < currHeight
+        ? (prevHeight - offset)
+        : currHeight;
+    if (len <= 0) return double.infinity;
+
+    final start = skipTopRows.clamp(0, len - 1);
+    final effectiveLen = len - start;
+    if (effectiveLen < 4) return double.infinity;
+
+    // Validate buffer sizes cover the rows we'll access.
+    // The last pixel index in the inner loop determines the worst-case offset.
+    final lastX = prevWidth > 1 ? (prevWidth - 1) ~/ 2 * 2 : 0;
+    if ((offset + len - 1) * prevBytesPerRow + lastX * 4 + 2 >=
+        prevBytes.length) {
+      return double.infinity;
+    }
+    if ((len - 1) * currBytesPerRow + lastX * 4 + 2 >= currBytes.length) {
+      return double.infinity;
+    }
+
+    double totalDiff = 0;
+    int sampleCount = 0;
+
+    for (var i = start; i < len; i++) {
+      final pRowOff = (offset + i) * prevBytesPerRow;
+      final cRowOff = i * currBytesPerRow;
+
+      for (var x = 0; x < prevWidth; x += 2) {
+        final pIdx = pRowOff + x * 4;
+        final cIdx = cRowOff + x * 4;
+        totalDiff += (prevBytes[pIdx] - currBytes[cIdx]).abs(); // B
+        totalDiff += (prevBytes[pIdx + 1] - currBytes[cIdx + 1]).abs(); // G
+        totalDiff += (prevBytes[pIdx + 2] - currBytes[cIdx + 2]).abs(); // R
+        sampleCount += 3;
+      }
+
+      // Early exit: if running MAD already exceeds best known, skip remaining rows.
+      // Only check after processing at least half the rows so the running MAD
+      // has stabilized (early rows near the header boundary can be noisy).
+      if (i >= start + (effectiveLen >> 1) &&
+          sampleCount > 0 &&
+          totalDiff / sampleCount > bestSoFar) {
+        return double.infinity;
+      }
+    }
+
+    return sampleCount > 0 ? totalDiff / sampleCount : double.infinity;
+  }
+
   /// Estimate the number of pinned rows at the top (sticky header).
   /// Rows that are nearly identical at the same Y in both frames are treated
   /// as fixed and excluded from overlap matching.
@@ -593,11 +688,13 @@ class ScrollCaptureService {
         mismatchStreak = 0;
       } else {
         mismatchStreak++;
-        // Require a small streak before we stop to tolerate noisy rows.
-        if (mismatchStreak >= 3) break;
+        // Require a larger streak to tolerate noisy rows at the
+        // header/content boundary (animations, borders, shadows).
+        if (mismatchStreak >= 5) break;
       }
     }
-    return pinned;
+    // Safety margin: avoid over-counting into the first content rows.
+    return (pinned - 2).clamp(0, pinned);
   }
 
   /// Find the overlap between two frames using column-sample comparison.
@@ -609,8 +706,15 @@ class ScrollCaptureService {
     List<List<double>> prevCols,
     List<List<double>> currCols,
     int prevHeight,
-    int currHeight,
-  ) {
+    int currHeight, {
+    // Optional raw BGRA for the refinement pass (null = skip refinement).
+    Uint8List? prevBytes,
+    int prevWidth = 0,
+    int prevBytesPerRow = 0,
+    Uint8List? currBytes,
+    int currWidth = 0,
+    int currBytesPerRow = 0,
+  }) {
     if (prevHeight != currHeight) return 0;
 
     const diffThreshold = 8.0; // max acceptable average column diff
@@ -642,11 +746,47 @@ class ScrollCaptureService {
         bestOffset = offset;
       }
 
-      // Early termination: only stop for near-perfect matches (diff ≈ 0)
-      if (bestDiff < 0.5) break;
+      // Early termination: stop only on near-perfect pixel matches.
+      // A threshold of 0.01 avoids locking onto wrong offsets that happen
+      // to score low on column-sampled data (repeating content like feeds).
+      if (bestDiff < 0.01) break;
     }
 
     if (bestDiff > diffThreshold || bestOffset <= 0) return 0;
+
+    // --- Refinement pass ---
+    // Fine-tune ±5 around the coarse winner using full-pixel-row comparison
+    // to correct 1-3px errors inherent in column-sampling.
+    if (prevBytes != null && currBytes != null) {
+      const radius = 5;
+      final refMin = (bestOffset - radius).clamp(minOffset, maxOffset);
+      final refMax = (bestOffset + radius).clamp(minOffset, maxOffset);
+
+      double bestRefDiff = double.infinity;
+      int bestRefOffset = bestOffset;
+
+      for (var off = refMin; off <= refMax; off++) {
+        final d = fullRowDiff(
+          prevBytes,
+          prevWidth,
+          prevHeight,
+          prevBytesPerRow,
+          currBytes,
+          currWidth,
+          currHeight,
+          currBytesPerRow,
+          off,
+          skipTopRows: pinnedTopRows,
+          bestSoFar: bestRefDiff,
+        );
+        if (d < bestRefDiff) {
+          bestRefDiff = d;
+          bestRefOffset = off;
+        }
+      }
+
+      bestOffset = bestRefOffset;
+    }
 
     final overlap = prevHeight - bestOffset;
     return overlap.clamp(0, currHeight);

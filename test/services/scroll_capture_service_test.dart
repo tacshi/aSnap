@@ -38,6 +38,23 @@ Uint8List _gradientFrame(int width, int height) {
   return bytes;
 }
 
+/// Build a shifted gradient frame where row y has value (y + scrollAmount) % 256.
+Uint8List _shiftedGradientFrame(int width, int height, int scrollAmount) {
+  final bytesPerRow = width * 4;
+  final bytes = Uint8List(height * bytesPerRow);
+  for (var y = 0; y < height; y++) {
+    final v = (y + scrollAmount) % 256;
+    for (var x = 0; x < width; x++) {
+      final idx = y * bytesPerRow + x * 4;
+      bytes[idx] = v;
+      bytes[idx + 1] = v;
+      bytes[idx + 2] = v;
+      bytes[idx + 3] = 255;
+    }
+  }
+  return bytes;
+}
+
 /// Build a frame with a fixed top header and scrolling body.
 /// [scrollAmount] shifts only the body content; header stays unchanged.
 Uint8List _stickyHeaderFrame(
@@ -147,7 +164,7 @@ void main() {
     test('grayscale calculation is correct', () {
       // Single pixel frame: R=100, G=150, B=200
       // Expected grayscale: 0.114*200 + 0.587*150 + 0.299*100 = 22.8 + 88.05 + 29.9 = 140.75
-      const width = 20;
+      const width = 50;
       const height = 1;
       final bytes = _solidFrame(width, height, 100, 150, 200);
       final result = ScrollCaptureService.columnSamples(
@@ -200,15 +217,237 @@ void main() {
     });
   });
 
+  group('fullRowDiff', () {
+    test('identical frames at correct offset → diff ≈ 0', () {
+      const width = 100;
+      const height = 50;
+      final frame = _solidFrame(width, height, 128, 128, 128);
+      final diff = ScrollCaptureService.fullRowDiff(
+        frame,
+        width,
+        height,
+        width * 4,
+        frame,
+        width,
+        height,
+        width * 4,
+        1,
+      );
+      expect(diff, closeTo(0, 0.01));
+    });
+
+    test('shifted gradient frames → diff ≈ 0 at correct offset', () {
+      const width = 100;
+      const height = 100;
+      const scrollAmount = 20;
+      final frameA = _gradientFrame(width, height);
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
+      final diff = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        scrollAmount,
+      );
+      expect(diff, closeTo(0, 0.01));
+    });
+
+    test('wrong offset → large diff', () {
+      const width = 100;
+      const height = 100;
+      const scrollAmount = 20;
+      final frameA = _gradientFrame(width, height);
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
+      // Off by 5 pixels
+      final diff = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        scrollAmount + 5,
+      );
+      expect(diff, greaterThan(1.0));
+    });
+
+    test('respects skipTopRows', () {
+      const width = 100;
+      const height = 100;
+      // Frame A: rows 0-19 = value 50, rows 20-99 = constant 128
+      // Frame B: rows 0-19 = value 200, rows 20-99 = constant 128
+      // With offset=1, rows 20+ compare prev[21..] with curr[20..],
+      // both constant 128, so diff should be ≈ 0 when skipping top rows.
+      final bytesPerRow = width * 4;
+      final frameA = Uint8List(height * bytesPerRow);
+      final frameB = Uint8List(height * bytesPerRow);
+      for (var y = 0; y < height; y++) {
+        for (var x = 0; x < width; x++) {
+          final idx = y * bytesPerRow + x * 4;
+          if (y < 20) {
+            frameA[idx] = 50;
+            frameA[idx + 1] = 50;
+            frameA[idx + 2] = 50;
+            frameB[idx] = 200;
+            frameB[idx + 1] = 200;
+            frameB[idx + 2] = 200;
+          } else {
+            frameA[idx] = 128;
+            frameA[idx + 1] = 128;
+            frameA[idx + 2] = 128;
+            frameB[idx] = 128;
+            frameB[idx + 1] = 128;
+            frameB[idx + 2] = 128;
+          }
+          frameA[idx + 3] = 255;
+          frameB[idx + 3] = 255;
+        }
+      }
+
+      // Without skipTopRows: large diff because top 20 rows differ
+      final diffNoSkip = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        1,
+      );
+      // With skipTopRows=20: diff ≈ 0 because only matching rows compared
+      final diffSkip = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        1,
+        skipTopRows: 20,
+      );
+      expect(diffNoSkip, greaterThan(diffSkip));
+      expect(diffSkip, closeTo(0, 0.01));
+    });
+
+    test('different widths → infinity', () {
+      final a = _solidFrame(100, 50, 128, 128, 128);
+      final b = _solidFrame(80, 50, 128, 128, 128);
+      expect(
+        ScrollCaptureService.fullRowDiff(a, 100, 50, 400, b, 80, 50, 320, 1),
+        double.infinity,
+      );
+    });
+
+    test('bestSoFar causes early return when data is mismatched', () {
+      const width = 100;
+      const height = 100;
+      const scrollAmount = 20;
+      final frameA = _gradientFrame(width, height);
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
+
+      // Wrong offset produces a large diff
+      final diffNoBound = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        scrollAmount + 5,
+      );
+      expect(diffNoBound, greaterThan(1.0));
+
+      // With a tight bestSoFar, should return early with a value > bestSoFar
+      const bestSoFar = 0.5;
+      final diffBounded = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        scrollAmount + 5,
+        bestSoFar: bestSoFar,
+      );
+      expect(diffBounded, greaterThan(bestSoFar));
+    });
+
+    test('bestSoFar does not affect result when data matches well', () {
+      const width = 100;
+      const height = 100;
+      const scrollAmount = 20;
+      final frameA = _gradientFrame(width, height);
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
+
+      // Correct offset with generous bestSoFar should return near-zero diff
+      final diff = ScrollCaptureService.fullRowDiff(
+        frameA,
+        width,
+        height,
+        width * 4,
+        frameB,
+        width,
+        height,
+        width * 4,
+        scrollAmount,
+        bestSoFar: 100.0,
+      );
+      expect(diff, closeTo(0, 0.01));
+    });
+
+    test('offset out of bounds → infinity', () {
+      final frame = _solidFrame(100, 50, 128, 128, 128);
+      expect(
+        ScrollCaptureService.fullRowDiff(
+          frame,
+          100,
+          50,
+          400,
+          frame,
+          100,
+          50,
+          400,
+          0,
+        ),
+        double.infinity,
+      );
+      expect(
+        ScrollCaptureService.fullRowDiff(
+          frame,
+          100,
+          50,
+          400,
+          frame,
+          100,
+          50,
+          400,
+          50,
+        ),
+        double.infinity,
+      );
+    });
+  });
+
   group('computeOverlap', () {
     test('synthetic shifted frames detect correct overlap', () {
-      // Simulate two frames of a gradient, where frame B is shifted down
-      // by 20 rows relative to frame A.
       const width = 100;
       const height = 100;
       const scrollAmount = 20;
 
-      // Frame A: rows 0..99 of gradient
       final frameA = _gradientFrame(width, height);
       final colsA = ScrollCaptureService.columnSamples(
         frameA,
@@ -217,19 +456,7 @@ void main() {
         width * 4,
       );
 
-      // Frame B: rows 20..119 of gradient (shifted by scrollAmount)
-      final bytesPerRow = width * 4;
-      final frameB = Uint8List(height * bytesPerRow);
-      for (var y = 0; y < height; y++) {
-        final v = (y + scrollAmount) % 256;
-        for (var x = 0; x < width; x++) {
-          final idx = y * bytesPerRow + x * 4;
-          frameB[idx] = v;
-          frameB[idx + 1] = v;
-          frameB[idx + 2] = v;
-          frameB[idx + 3] = 255;
-        }
-      }
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
       final colsB = ScrollCaptureService.columnSamples(
         frameB,
         width,
@@ -296,18 +523,7 @@ void main() {
         width * 4,
       );
 
-      final bytesPerRow = width * 4;
-      final frameB = Uint8List(height * bytesPerRow);
-      for (var y = 0; y < height; y++) {
-        final v = (y + scrollAmount) % 256;
-        for (var x = 0; x < width; x++) {
-          final idx = y * bytesPerRow + x * 4;
-          frameB[idx] = v;
-          frameB[idx + 1] = v;
-          frameB[idx + 2] = v;
-          frameB[idx + 3] = 255;
-        }
-      }
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
       final colsB = ScrollCaptureService.columnSamples(
         frameB,
         width,
@@ -359,6 +575,134 @@ void main() {
 
       final overlap = service.computeOverlap(colsA, colsB, height, height);
       expect(overlap, height - scrollAmount);
+    });
+
+    test('refinement corrects overlap with BGRA data', () {
+      const width = 100;
+      const height = 100;
+      const scrollAmount = 20;
+
+      final frameA = _gradientFrame(width, height);
+      final frameB = _shiftedGradientFrame(width, height, scrollAmount);
+
+      final colsA = ScrollCaptureService.columnSamples(
+        frameA,
+        width,
+        height,
+        width * 4,
+      );
+      final colsB = ScrollCaptureService.columnSamples(
+        frameB,
+        width,
+        height,
+        width * 4,
+      );
+
+      final service = ScrollCaptureService();
+      service.predictedOffset = 0;
+
+      final overlap = service.computeOverlap(
+        colsA,
+        colsB,
+        height,
+        height,
+        prevBytes: frameA,
+        prevWidth: width,
+        prevBytesPerRow: width * 4,
+        currBytes: frameB,
+        currWidth: width,
+        currBytesPerRow: width * 4,
+      );
+      expect(overlap, height - scrollAmount);
+    });
+
+    test('refinement with sticky header produces correct overlap', () {
+      const width = 120;
+      const height = 200;
+      const headerHeight = 40;
+      const scrollAmount = 30;
+
+      final frameA = _stickyHeaderFrame(
+        width,
+        height,
+        headerHeight: headerHeight,
+        scrollAmount: 0,
+      );
+      final frameB = _stickyHeaderFrame(
+        width,
+        height,
+        headerHeight: headerHeight,
+        scrollAmount: scrollAmount,
+      );
+
+      final colsA = ScrollCaptureService.columnSamples(
+        frameA,
+        width,
+        height,
+        width * 4,
+      );
+      final colsB = ScrollCaptureService.columnSamples(
+        frameB,
+        width,
+        height,
+        width * 4,
+      );
+
+      final service = ScrollCaptureService();
+      service.predictedOffset = scrollAmount;
+
+      final overlap = service.computeOverlap(
+        colsA,
+        colsB,
+        height,
+        height,
+        prevBytes: frameA,
+        prevWidth: width,
+        prevBytesPerRow: width * 4,
+        currBytes: frameB,
+        currWidth: width,
+        currBytesPerRow: width * 4,
+      );
+      expect(overlap, height - scrollAmount);
+    });
+
+    test('refinement picks lowest-diff offset without bias', () {
+      const width = 100;
+      const height = 100;
+
+      final frameA = _gradientFrame(width, height);
+      final frameB = _shiftedGradientFrame(width, height, 20);
+
+      final colsA = ScrollCaptureService.columnSamples(
+        frameA,
+        width,
+        height,
+        width * 4,
+      );
+      final colsB = ScrollCaptureService.columnSamples(
+        frameB,
+        width,
+        height,
+        width * 4,
+      );
+
+      final service = ScrollCaptureService();
+      service.predictedOffset = 20;
+
+      // Refinement should pick the offset with strictly lowest fullRowDiff.
+      final overlap = service.computeOverlap(
+        colsA,
+        colsB,
+        height,
+        height,
+        prevBytes: frameA,
+        prevWidth: width,
+        prevBytesPerRow: width * 4,
+        currBytes: frameB,
+        currWidth: width,
+        currBytesPerRow: width * 4,
+      );
+      expect(overlap, height - 20);
     });
   });
 }

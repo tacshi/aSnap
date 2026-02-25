@@ -2,7 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-/// An 8× magnifier loupe that shows a zoomed view of the source image
+/// A 10× magnifier loupe that shows a zoomed view of the source image
 /// centered on the cursor position, with a crosshair and pixel coordinates.
 class MagnifierLoupe extends StatelessWidget {
   final ui.Image sourceImage;
@@ -11,7 +11,7 @@ class MagnifierLoupe extends StatelessWidget {
   final Size screenSize;
 
   static const double loupeSize = 140;
-  static const double zoomFactor = 8;
+  static const double zoomFactor = 10;
   static const double cursorOffset = 20;
 
   const MagnifierLoupe({
