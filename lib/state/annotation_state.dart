@@ -347,10 +347,16 @@ class AnnotationState extends ChangeNotifier {
   void commitEdit() {
     if (!_editing || _preEditSnapshot == null) return;
     _editing = false;
-    // Restore pre-edit state, then commit the current state as new entry.
     final current = [...annotations];
-    _history[_historyIndex] = _preEditSnapshot!;
+    final before = _preEditSnapshot!;
+    _history[_historyIndex] = before;
     _preEditSnapshot = null;
+    // Skip history push if the selected annotation didn't actually change.
+    final i = _selectedIndex;
+    if (i != null && i < current.length && i < before.length &&
+        identical(current[i], before[i])) {
+      return;
+    }
     _commitSnapshot(current);
   }
 

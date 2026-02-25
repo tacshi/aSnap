@@ -1412,6 +1412,12 @@ private class ToolbarContentView: NSView {
   private var trackingAreaRef: NSTrackingArea?
   private var cursorPushed = false
 
+  deinit {
+    if cursorPushed {
+      NSCursor.pop()
+    }
+  }
+
   override var isOpaque: Bool { false }
   override func draw(_ dirtyRect: NSRect) { /* empty — layer draws background */ }
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }

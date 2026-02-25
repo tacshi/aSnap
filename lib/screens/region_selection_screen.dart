@@ -67,7 +67,6 @@ class RegionSelectionScreen extends StatefulWidget {
   /// Annotation state for drawing shapes on the selected region.
   final AnnotationState? annotationState;
   final WindowService windowService;
-  final Offset screenOrigin;
 
   const RegionSelectionScreen({
     super.key,
@@ -75,7 +74,6 @@ class RegionSelectionScreen extends StatefulWidget {
     required this.windowRects,
     required this.onCancel,
     required this.windowService,
-    required this.screenOrigin,
     this.onCopy,
     this.onSave,
     this.onRegionSelected,

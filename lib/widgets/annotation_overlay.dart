@@ -73,6 +73,7 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
   // Text editing.
   final TextEditingController _textController = TextEditingController();
   final FocusNode _textFocusNode = FocusNode();
+  final FocusNode _keyListenerFocusNode = FocusNode();
   bool _wasEditingText = false;
 
   // Pre-loaded raw RGBA pixel data for mosaic pixelation.
@@ -122,6 +123,7 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
     widget.annotationState.removeListener(_onAnnotationStateChanged);
     _textController.dispose();
     _textFocusNode.dispose();
+    _keyListenerFocusNode.dispose();
     super.dispose();
   }
 
@@ -398,7 +400,7 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
         type: MaterialType.transparency,
         child: IntrinsicWidth(
           child: KeyboardListener(
-            focusNode: FocusNode(), // passive listener, real focus on TextField
+            focusNode: _keyListenerFocusNode,
             onKeyEvent: (event) {
               if (event is KeyDownEvent &&
                   event.logicalKey == LogicalKeyboardKey.escape) {
