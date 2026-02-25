@@ -6,16 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../models/annotation.dart';
-import '../services/window_service.dart';
 import '../state/annotation_state.dart';
 import '../state/app_state.dart';
 import '../widgets/annotation_overlay.dart';
+import '../widgets/selection_toolbar.dart';
 import '../widgets/shape_popover.dart';
 
 class PreviewScreen extends StatefulWidget {
   final AppState appState;
   final AnnotationState annotationState;
-  final WindowService windowService;
   final VoidCallback onCopy;
   final VoidCallback onSave;
   final VoidCallback onDiscard;
@@ -24,7 +23,6 @@ class PreviewScreen extends StatefulWidget {
     super.key,
     required this.appState,
     required this.annotationState,
-    required this.windowService,
     required this.onCopy,
     required this.onSave,
     required this.onDiscard,
@@ -42,6 +40,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
   ShapeType? _activeShapeType;
   bool _popoverVisible = false;
   OverlayEntry? _popoverEntry;
+  final _popoverAnchor = LayerLink();
 
   /// Tracks the last image to detect capture changes and reset annotation UI.
   ui.Image? _lastImage;
@@ -53,14 +52,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
     // This avoids issues where SingleChildScrollView's Scrollable steals
     // focus from KeyboardListener, breaking Escape and shortcuts.
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    // Wire native toolbar button callbacks.
-    widget.windowService.onToolbarAction = _handleToolbarAction;
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
-    widget.windowService.onToolbarAction = null;
     _removePopover();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -114,62 +110,19 @@ class _PreviewScreenState extends State<PreviewScreen> {
         _showPopover();
       }
     });
-    _syncToolbarState();
-  }
-
-  /// Handles button clicks from the native toolbar panel.
-  void _handleToolbarAction(String action) {
-    if (action.startsWith('toolTap:')) {
-      final type = _shapeTypeFromString(action.substring('toolTap:'.length));
-      if (type != null) _handleToolTap(type);
-    } else {
-      switch (action) {
-        case 'undo':
-          widget.annotationState.undo();
-        case 'redo':
-          widget.annotationState.redo();
-        case 'copy':
-          widget.onCopy();
-        case 'save':
-          widget.onSave();
-        case 'discard':
-          widget.onDiscard();
-      }
-    }
-  }
-
-  static ShapeType? _shapeTypeFromString(String name) {
-    return switch (name) {
-      'rectangle' => ShapeType.rectangle,
-      'ellipse' => ShapeType.ellipse,
-      'arrow' => ShapeType.arrow,
-      'line' => ShapeType.line,
-      'pencil' => ShapeType.pencil,
-      'marker' => ShapeType.marker,
-      'number' => ShapeType.number,
-      'text' => ShapeType.text,
-      _ => null,
-    };
-  }
-
-  /// Push current annotation state to the native toolbar buttons.
-  void _syncToolbarState() {
-    widget.windowService.updateToolbarState(
-      activeTool: _activeShapeType?.name,
-      canUndo: widget.annotationState.canUndo,
-      canRedo: widget.annotationState.canRedo,
-      hasAnnotations: widget.annotationState.hasAnnotations,
-    );
   }
 
   void _showPopover() {
     _removePopover();
     _popoverVisible = true;
     _popoverEntry = OverlayEntry(
-      builder: (_) => Align(
-        alignment: Alignment.bottomCenter,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+      builder: (_) => CompositedTransformFollower(
+        link: _popoverAnchor,
+        targetAnchor: Alignment.topCenter,
+        followerAnchor: Alignment.bottomCenter,
+        offset: const Offset(0, -8),
+        child: Align(
+          alignment: Alignment.bottomCenter,
           child: ShapePopover(
             annotationState: widget.annotationState,
             onDismiss: () {
@@ -277,8 +230,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
         }
         _lastImage = image;
 
-        // Keep native toolbar buttons in sync with annotation state.
-        _syncToolbarState();
         _scheduleFocusSync();
         return Focus(
           focusNode: _focusNode,
@@ -322,6 +273,32 @@ class _PreviewScreenState extends State<PreviewScreen> {
               imageDisplayRect: imageDisplayRect,
               imagePixelSize: imageSize,
               enabled: _activeShapeType != null,
+              sourceImage: image,
+            ),
+
+            // Toolbar (Flutter) — bottom center of the window.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 12,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.basic,
+                child: Center(
+                  child: SelectionToolbar(
+                    onCopy: widget.onCopy,
+                    onSave: widget.onSave,
+                    onClose: widget.onDiscard,
+                    onToolTap: _handleToolTap,
+                    onUndo: widget.annotationState.undo,
+                    onRedo: widget.annotationState.redo,
+                    activeShapeType: _activeShapeType,
+                    hasAnnotations: widget.annotationState.hasAnnotations,
+                    canUndo: widget.annotationState.canUndo,
+                    canRedo: widget.annotationState.canRedo,
+                    settingsLayerLink: _popoverAnchor,
+                  ),
+                ),
+              ),
             ),
           ],
         );
@@ -408,9 +385,35 @@ class _PreviewScreenState extends State<PreviewScreen> {
                         imageDisplayRect: imageDisplayRect,
                         imagePixelSize: imagePixelSize,
                         enabled: toolActive,
+                        sourceImage: image,
                       ),
                     );
                   },
+                ),
+              ),
+            ),
+
+            // Toolbar (Flutter) — bottom center of the window.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 12,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.basic,
+                child: Center(
+                  child: SelectionToolbar(
+                    onCopy: widget.onCopy,
+                    onSave: widget.onSave,
+                    onClose: widget.onDiscard,
+                    onToolTap: _handleToolTap,
+                    onUndo: widget.annotationState.undo,
+                    onRedo: widget.annotationState.redo,
+                    activeShapeType: _activeShapeType,
+                    hasAnnotations: widget.annotationState.hasAnnotations,
+                    canUndo: widget.annotationState.canUndo,
+                    canRedo: widget.annotationState.canRedo,
+                    settingsLayerLink: _popoverAnchor,
+                  ),
                 ),
               ),
             ),

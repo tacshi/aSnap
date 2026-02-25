@@ -12,6 +12,7 @@ class DrawingSettings {
   final double strokeWidth;
   final double cornerRadius;
   final String? fontFamily;
+  final MosaicMode mosaicMode;
 
   const DrawingSettings({
     this.shapeType = ShapeType.rectangle,
@@ -19,6 +20,7 @@ class DrawingSettings {
     this.strokeWidth = 6.0,
     this.cornerRadius = 20,
     this.fontFamily,
+    this.mosaicMode = MosaicMode.pixelate,
   });
 
   DrawingSettings copyWith({
@@ -28,12 +30,14 @@ class DrawingSettings {
     double? cornerRadius,
     String? fontFamily,
     bool clearFontFamily = false,
+    MosaicMode? mosaicMode,
   }) => DrawingSettings(
     shapeType: shapeType ?? this.shapeType,
     color: color ?? this.color,
     strokeWidth: strokeWidth ?? this.strokeWidth,
     cornerRadius: cornerRadius ?? this.cornerRadius,
     fontFamily: clearFontFamily ? null : (fontFamily ?? this.fontFamily),
+    mosaicMode: mosaicMode ?? this.mosaicMode,
   );
 }
 
@@ -57,8 +61,11 @@ class AnnotationState extends ChangeNotifier {
   /// Per-tool settings memory (preserved across tool switches).
   final Map<ShapeType, double> _toolStrokeWidth = {
     ShapeType.text: 9.0, // 9 × 4 = 36px default
+    ShapeType.mosaic: 8.0, // default block size / blur intensity
   };
   final Map<ShapeType, Color> _toolColor = {};
+  final Map<ShapeType, MosaicMode> _toolMosaicMode = {};
+  final Map<MosaicMode, Color> _mosaicModeColor = {};
 
   /// All committed annotations.
   List<Annotation> get annotations => _history[_historyIndex];
@@ -180,6 +187,7 @@ class AnnotationState extends ChangeNotifier {
       strokeWidth: effectiveStrokeWidth,
       cornerRadius: _settings.cornerRadius,
       points: isFreehand ? [startPoint] : const [],
+      mosaicMode: _settings.mosaicMode,
     );
     notifyListeners();
   }
@@ -250,18 +258,44 @@ class AnnotationState extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   void updateSettings(DrawingSettings newSettings) {
-    // Save/restore per-tool color and strokeWidth when switching tools.
-    if (newSettings.shapeType != _settings.shapeType) {
+    final previous = _settings;
+    const defaultSettings = DrawingSettings();
+    // Save/restore per-tool color, strokeWidth, and mosaicMode when switching.
+    if (newSettings.shapeType != previous.shapeType) {
       // Save current tool's settings.
-      _toolStrokeWidth[_settings.shapeType] = _settings.strokeWidth;
-      _toolColor[_settings.shapeType] = _settings.color;
+      _toolStrokeWidth[previous.shapeType] = previous.strokeWidth;
+      _toolColor[previous.shapeType] = previous.color;
+      _toolMosaicMode[previous.shapeType] = previous.mosaicMode;
+      if (previous.shapeType == ShapeType.mosaic) {
+        _mosaicModeColor[previous.mosaicMode] = previous.color;
+      }
       // Restore target tool's settings (fall back to defaults).
       final target = newSettings.shapeType;
+      final restoredMosaicMode = _toolMosaicMode[target] ?? previous.mosaicMode;
+      final restoredColor = target == ShapeType.mosaic
+          ? (_mosaicModeColor[restoredMosaicMode] ??
+                (_toolColor[target] ?? defaultSettings.color))
+          : (_toolColor[target] ?? defaultSettings.color);
       newSettings = newSettings.copyWith(
-        strokeWidth: _toolStrokeWidth[target] ?? _settings.strokeWidth,
-        color: _toolColor[target] ?? _settings.color,
+        strokeWidth: _toolStrokeWidth[target] ?? previous.strokeWidth,
+        color: restoredColor,
+        mosaicMode: restoredMosaicMode,
       );
     }
+
+    if (newSettings.shapeType == ShapeType.mosaic) {
+      if (previous.shapeType == ShapeType.mosaic) {
+        _mosaicModeColor[previous.mosaicMode] = previous.color;
+      }
+      final nextMode = newSettings.mosaicMode;
+      if (previous.shapeType == ShapeType.mosaic &&
+          nextMode != previous.mosaicMode) {
+        final restored = _mosaicModeColor[nextMode] ?? previous.color;
+        newSettings = newSettings.copyWith(color: restored);
+      }
+      _mosaicModeColor[nextMode] = newSettings.color;
+    }
+    _toolColor[newSettings.shapeType] = newSettings.color;
     _settings = newSettings;
     notifyListeners();
   }
@@ -350,8 +384,11 @@ class AnnotationState extends ChangeNotifier {
     _textEditPosition = null;
     _toolStrokeWidth
       ..clear()
-      ..[ShapeType.text] = 9.0;
+      ..[ShapeType.text] = 9.0
+      ..[ShapeType.mosaic] = 8.0;
     _toolColor.clear();
+    _toolMosaicMode.clear();
+    _mosaicModeColor.clear();
     notifyListeners();
   }
 }

@@ -364,6 +364,111 @@ void main() {
     });
   });
 
+  group('Mosaic annotation', () {
+    test('isMosaic returns true for mosaic type', () {
+      const a = Annotation(
+        type: ShapeType.mosaic,
+        start: Offset(0, 0),
+        end: Offset(100, 100),
+        color: Color(0xFFFF0000),
+        strokeWidth: 2,
+      );
+      expect(a.isMosaic, isTrue);
+      expect(a.isFreehand, isFalse);
+      expect(a.isStamp, isFalse);
+      expect(a.isText, isFalse);
+    });
+
+    test('mosaicMode defaults to MosaicMode.pixelate', () {
+      const a = Annotation(
+        type: ShapeType.mosaic,
+        start: Offset(0, 0),
+        end: Offset(100, 100),
+        color: Color(0xFFFF0000),
+        strokeWidth: 2,
+      );
+      expect(a.mosaicMode, MosaicMode.pixelate);
+    });
+
+    test('withMosaicMode returns copy with updated mode', () {
+      const a = Annotation(
+        type: ShapeType.mosaic,
+        start: Offset(0, 0),
+        end: Offset(100, 100),
+        color: Color(0xFFFF0000),
+        strokeWidth: 2,
+      );
+      final b = a.withMosaicMode(MosaicMode.blur);
+      expect(b.mosaicMode, MosaicMode.blur);
+      expect(b.type, ShapeType.mosaic);
+      expect(b.start, a.start);
+      expect(b.end, a.end);
+      expect(b.color, a.color);
+      expect(b.strokeWidth, a.strokeWidth);
+      // Original unchanged (immutable).
+      expect(a.mosaicMode, MosaicMode.pixelate);
+
+      final c = a.withMosaicMode(MosaicMode.solidColor);
+      expect(c.mosaicMode, MosaicMode.solidColor);
+    });
+
+    test('translated preserves mosaicMode', () {
+      const a = Annotation(
+        type: ShapeType.mosaic,
+        start: Offset(10, 20),
+        end: Offset(100, 80),
+        color: Color(0xFFFF0000),
+        strokeWidth: 2,
+        mosaicMode: MosaicMode.blur,
+      );
+      final b = a.translated(const Offset(5, -5));
+      expect(b.mosaicMode, MosaicMode.blur);
+      expect(b.start, const Offset(15, 15));
+      expect(b.end, const Offset(105, 75));
+    });
+
+    test('isMosaic returns false for other types', () {
+      const a = Annotation(
+        type: ShapeType.rectangle,
+        start: Offset(0, 0),
+        end: Offset(100, 100),
+        color: Color(0xFFFF0000),
+        strokeWidth: 2,
+      );
+      expect(a.isMosaic, isFalse);
+    });
+
+    test('mosaicMode preserved through copy methods', () {
+      const a = Annotation(
+        type: ShapeType.mosaic,
+        start: Offset(0, 0),
+        end: Offset(100, 100),
+        color: Color(0xFFFF0000),
+        strokeWidth: 2,
+        mosaicMode: MosaicMode.blur,
+      );
+      expect(a.withEnd(const Offset(200, 200)).mosaicMode, MosaicMode.blur);
+      expect(a.withConstrained(true).mosaicMode, MosaicMode.blur);
+      expect(a.withText('test').mosaicMode, MosaicMode.blur);
+      expect(a.withPoints(const [Offset(1, 1)]).mosaicMode, MosaicMode.blur);
+    });
+
+    test('boundingRect uses start/end for mosaic', () {
+      const a = Annotation(
+        type: ShapeType.mosaic,
+        start: Offset(10, 20),
+        end: Offset(100, 80),
+        color: Color(0xFFFF0000),
+        strokeWidth: 2,
+      );
+      final rect = a.boundingRect;
+      expect(rect.left, 10);
+      expect(rect.top, 20);
+      expect(rect.right, 100);
+      expect(rect.bottom, 80);
+    });
+  });
+
   group('translated', () {
     test('shifts start and end by delta for text annotation', () {
       const a = Annotation(

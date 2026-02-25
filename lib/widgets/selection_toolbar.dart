@@ -27,6 +27,9 @@ class SelectionToolbar extends StatelessWidget {
   /// Layer link for anchoring the settings popover above the active tool.
   final LayerLink? settingsLayerLink;
 
+  /// Global key for measuring the active tool position (popover clamping).
+  final GlobalKey? settingsAnchorKey;
+
   const SelectionToolbar({
     super.key,
     required this.onCopy,
@@ -40,6 +43,7 @@ class SelectionToolbar extends StatelessWidget {
     this.canUndo = false,
     this.canRedo = false,
     this.settingsLayerLink,
+    this.settingsAnchorKey,
   });
 
   @override
@@ -118,6 +122,7 @@ class SelectionToolbar extends StatelessWidget {
       (ShapeType.line, Icons.horizontal_rule_rounded, 'Line'),
       (ShapeType.pencil, Icons.edit_outlined, 'Pencil'),
       (ShapeType.marker, Icons.brush_outlined, 'Marker'),
+      (ShapeType.mosaic, Icons.blur_on_rounded, 'Mosaic'),
       (ShapeType.number, Icons.looks_one_outlined, 'Number'),
       (ShapeType.text, Icons.text_fields_rounded, 'Text'),
     ];
@@ -140,6 +145,9 @@ class SelectionToolbar extends StatelessWidget {
           link: settingsLayerLink!,
           child: button,
         );
+      }
+      if (isActive && settingsAnchorKey != null) {
+        button = KeyedSubtree(key: settingsAnchorKey, child: button);
       }
       widgets.add(button);
     }

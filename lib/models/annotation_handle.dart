@@ -62,6 +62,17 @@ List<AnnHandle> annotationHandles(Annotation annotation) {
             controlPointIndex: i,
           ),
       ];
+    case ShapeType.mosaic:
+      return [
+        AnnHandle(AnnHandleType.topLeft, rect.topLeft),
+        AnnHandle(AnnHandleType.topRight, rect.topRight),
+        AnnHandle(AnnHandleType.bottomLeft, rect.bottomLeft),
+        AnnHandle(AnnHandleType.bottomRight, rect.bottomRight),
+        AnnHandle(AnnHandleType.top, Offset(rect.center.dx, rect.top)),
+        AnnHandle(AnnHandleType.right, Offset(rect.right, rect.center.dy)),
+        AnnHandle(AnnHandleType.bottom, Offset(rect.center.dx, rect.bottom)),
+        AnnHandle(AnnHandleType.left, Offset(rect.left, rect.center.dy)),
+      ];
     case ShapeType.text:
     case ShapeType.pencil:
     case ShapeType.marker:
@@ -188,5 +199,6 @@ Annotation _withStartEnd(Annotation a, Offset start, Offset end) {
     label: a.label,
     text: a.text,
     fontFamily: a.fontFamily,
+    mosaicMode: a.mosaicMode,
   );
 }

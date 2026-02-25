@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,6 +38,10 @@ class AnnotationOverlay extends StatefulWidget {
   /// allow handle drags to take priority over annotation drawing).
   final bool handlePointerEvents;
 
+  /// Original screenshot image, needed for mosaic/blur rendering.
+  final ui.Image? sourceImage;
+  final Offset sourceImageOffset;
+
   const AnnotationOverlay({
     super.key,
     required this.annotationState,
@@ -43,6 +49,8 @@ class AnnotationOverlay extends StatefulWidget {
     required this.imagePixelSize,
     required this.enabled,
     this.handlePointerEvents = true,
+    this.sourceImage,
+    this.sourceImageOffset = Offset.zero,
   });
 
   @override
@@ -67,10 +75,15 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
   final FocusNode _textFocusNode = FocusNode();
   bool _wasEditingText = false;
 
+  // Pre-loaded raw RGBA pixel data for mosaic pixelation.
+  ByteData? _sourcePixels;
+  ui.Image? _pixelsForImage;
+
   @override
   void initState() {
     super.initState();
     widget.annotationState.addListener(_onAnnotationStateChanged);
+    _updateSourcePixels();
   }
 
   @override
@@ -80,6 +93,28 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
       oldWidget.annotationState.removeListener(_onAnnotationStateChanged);
       widget.annotationState.addListener(_onAnnotationStateChanged);
     }
+    if (!identical(widget.sourceImage, oldWidget.sourceImage)) {
+      _updateSourcePixels();
+    }
+  }
+
+  /// Async-load raw RGBA pixels from [widget.sourceImage] for mosaic
+  /// pixelation. The painter can't call async methods, so we pre-load here.
+  void _updateSourcePixels() {
+    final image = widget.sourceImage;
+    if (image == null) {
+      _sourcePixels = null;
+      _pixelsForImage = null;
+      return;
+    }
+    if (identical(image, _pixelsForImage)) return;
+    // Keep a reference so we don't reload for the same image.
+    _pixelsForImage = image;
+    image.toByteData(format: ui.ImageByteFormat.rawRgba).then((bytes) {
+      if (!mounted) return;
+      if (!identical(widget.sourceImage, image)) return; // stale
+      setState(() => _sourcePixels = bytes);
+    });
   }
 
   @override
@@ -420,6 +455,9 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
               selectedIndex: widget.annotationState.selectedIndex,
               imageDisplayRect: widget.imageDisplayRect,
               imagePixelSize: widget.imagePixelSize,
+              sourceImage: widget.sourceImage,
+              sourcePixels: _sourcePixels,
+              sourceImageOffset: widget.sourceImageOffset,
             ),
             size: Size.infinite,
           ),
@@ -449,6 +487,9 @@ class _ScaledAnnotationPainter extends CustomPainter {
   final int? selectedIndex;
   final Rect imageDisplayRect;
   final Size imagePixelSize;
+  final ui.Image? sourceImage;
+  final ByteData? sourcePixels;
+  final Offset sourceImageOffset;
 
   _ScaledAnnotationPainter({
     required this.annotations,
@@ -456,6 +497,9 @@ class _ScaledAnnotationPainter extends CustomPainter {
     this.selectedIndex,
     required this.imageDisplayRect,
     required this.imagePixelSize,
+    this.sourceImage,
+    this.sourcePixels,
+    this.sourceImageOffset = Offset.zero,
   });
 
   @override
@@ -478,6 +522,9 @@ class _ScaledAnnotationPainter extends CustomPainter {
       annotations: annotations,
       activeAnnotation: activeAnnotation,
       selectedIndex: selectedIndex,
+      sourceImage: sourceImage,
+      sourcePixels: sourcePixels,
+      sourceImageOffset: sourceImageOffset,
     );
     painter.paint(canvas, imagePixelSize);
 
@@ -489,6 +536,9 @@ class _ScaledAnnotationPainter extends CustomPainter {
     return !identical(annotations, oldDelegate.annotations) ||
         activeAnnotation != oldDelegate.activeAnnotation ||
         selectedIndex != oldDelegate.selectedIndex ||
-        imageDisplayRect != oldDelegate.imageDisplayRect;
+        imageDisplayRect != oldDelegate.imageDisplayRect ||
+        !identical(sourceImage, oldDelegate.sourceImage) ||
+        !identical(sourcePixels, oldDelegate.sourcePixels) ||
+        sourceImageOffset != oldDelegate.sourceImageOffset;
   }
 }

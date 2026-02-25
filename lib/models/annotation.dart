@@ -1,7 +1,20 @@
 import 'dart:ui';
 
+/// The mosaic/blur mode for mosaic annotations.
+enum MosaicMode { pixelate, blur, solidColor }
+
 /// The type of shape annotation.
-enum ShapeType { rectangle, ellipse, arrow, line, pencil, marker, number, text }
+enum ShapeType {
+  rectangle,
+  ellipse,
+  arrow,
+  line,
+  pencil,
+  marker,
+  mosaic,
+  number,
+  text,
+}
 
 /// Immutable representation of a single drawn annotation.
 ///
@@ -41,6 +54,9 @@ class Annotation {
   /// Font family for text annotations (null = system default sans-serif).
   final String? fontFamily;
 
+  /// Mosaic mode for mosaic annotations.
+  final MosaicMode mosaicMode;
+
   const Annotation({
     required this.type,
     required this.start,
@@ -54,6 +70,7 @@ class Annotation {
     this.label,
     this.text,
     this.fontFamily,
+    this.mosaicMode = MosaicMode.pixelate,
   });
 
   /// Whether this annotation is a freehand type (pencil or marker).
@@ -64,6 +81,9 @@ class Annotation {
 
   /// Whether this annotation is a text annotation.
   bool get isText => type == ShapeType.text;
+
+  /// Whether this annotation is a mosaic annotation.
+  bool get isMosaic => type == ShapeType.mosaic;
 
   /// Base font size for text annotations, derived from stroke width.
   double get fontSize => strokeWidth * 4;
@@ -106,6 +126,7 @@ class Annotation {
     label: label,
     text: text,
     fontFamily: fontFamily,
+    mosaicMode: mosaicMode,
   );
 
   Annotation withConstrained(bool value) => Annotation(
@@ -121,6 +142,7 @@ class Annotation {
     label: label,
     text: text,
     fontFamily: fontFamily,
+    mosaicMode: mosaicMode,
   );
 
   /// Returns a copy with the control point at [index] replaced by [point].
@@ -140,6 +162,7 @@ class Annotation {
       label: label,
       text: text,
       fontFamily: fontFamily,
+      mosaicMode: mosaicMode,
     );
   }
 
@@ -159,6 +182,7 @@ class Annotation {
       label: label,
       text: text,
       fontFamily: fontFamily,
+      mosaicMode: mosaicMode,
     );
   }
 
@@ -178,6 +202,7 @@ class Annotation {
       label: label,
       text: text,
       fontFamily: fontFamily,
+      mosaicMode: mosaicMode,
     );
   }
 
@@ -196,6 +221,7 @@ class Annotation {
       label: label,
       text: text,
       fontFamily: fontFamily,
+      mosaicMode: mosaicMode,
     );
   }
 
@@ -214,6 +240,7 @@ class Annotation {
       label: label,
       text: text,
       fontFamily: fontFamily,
+      mosaicMode: mosaicMode,
     );
   }
 
@@ -232,6 +259,26 @@ class Annotation {
       label: label,
       text: newText,
       fontFamily: fontFamily,
+      mosaicMode: mosaicMode,
+    );
+  }
+
+  /// Returns a copy with the given [mode] for mosaic annotations.
+  Annotation withMosaicMode(MosaicMode mode) {
+    return Annotation(
+      type: type,
+      start: start,
+      end: end,
+      color: color,
+      strokeWidth: strokeWidth,
+      cornerRadius: cornerRadius,
+      constrained: constrained,
+      controlPoints: controlPoints,
+      points: points,
+      label: label,
+      text: text,
+      fontFamily: fontFamily,
+      mosaicMode: mode,
     );
   }
 
@@ -250,6 +297,7 @@ class Annotation {
       label: label,
       text: text,
       fontFamily: fontFamily,
+      mosaicMode: mosaicMode,
     );
   }
 }

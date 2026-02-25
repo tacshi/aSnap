@@ -36,6 +36,9 @@ class ShapePopover extends StatelessWidget {
         listenable: annotationState,
         builder: (context, _) {
           final settings = annotationState.settings;
+          final showColorControls =
+              settings.shapeType != ShapeType.mosaic ||
+              settings.mosaicMode == MosaicMode.solidColor;
           return Material(
             type: MaterialType.transparency,
             child: Container(
@@ -62,12 +65,19 @@ class ShapePopover extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildColorRow(context, settings),
-                    const SizedBox(height: 10),
+                    if (showColorControls) ...[
+                      _buildColorRow(context, settings),
+                      const SizedBox(height: 10),
+                    ],
                     _buildStrokeSlider(settings),
-                    if (settings.shapeType == ShapeType.rectangle) ...[
+                    if (settings.shapeType == ShapeType.rectangle ||
+                        settings.shapeType == ShapeType.mosaic) ...[
                       const SizedBox(height: 10),
                       _buildCornerRadiusSlider(settings),
+                    ],
+                    if (settings.shapeType == ShapeType.mosaic) ...[
+                      const SizedBox(height: 10),
+                      _buildMosaicModePicker(settings),
                     ],
                     if (settings.shapeType == ShapeType.text) ...[
                       const SizedBox(height: 10),
@@ -113,9 +123,16 @@ class ShapePopover extends StatelessWidget {
   }
 
   Widget _buildStrokeSlider(DrawingSettings settings) {
+    final isMosaic = settings.shapeType == ShapeType.mosaic;
     final isText = settings.shapeType == ShapeType.text;
-    final label = isText ? 'Size' : 'Stroke';
-    final valueLabel = isText
+    final label = isMosaic
+        ? 'Intensity'
+        : isText
+        ? 'Size'
+        : 'Stroke';
+    final valueLabel = isMosaic
+        ? '${settings.strokeWidth.round()}'
+        : isText
         ? '${(settings.strokeWidth * 4).round()}px'
         : '${settings.strokeWidth.round()}px';
     return Column(
@@ -225,6 +242,42 @@ class ShapePopover extends StatelessWidget {
                       fontFamily: entry.value,
                       clearFontFamily: entry.value == null,
                     ),
+                  );
+                },
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Mosaic mode options: display name → MosaicMode value.
+  static const _mosaicModes = <String, MosaicMode>{
+    'Pixelate': MosaicMode.pixelate,
+    'Blur': MosaicMode.blur,
+    'Solid Color': MosaicMode.solidColor,
+  };
+
+  Widget _buildMosaicModePicker(DrawingSettings settings) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Mode',
+          style: TextStyle(color: Colors.white70, fontSize: 11),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 4,
+          runSpacing: 4,
+          children: [
+            for (final entry in _mosaicModes.entries)
+              _ModeChip(
+                label: entry.key,
+                isSelected: settings.mosaicMode == entry.value,
+                onTap: () {
+                  annotationState.updateSettings(
+                    settings.copyWith(mosaicMode: entry.value),
                   );
                 },
               ),
@@ -400,6 +453,48 @@ class _FontChip extends StatelessWidget {
             color: isSelected ? Colors.white : Colors.white70,
             fontSize: 11,
             fontFamily: fontFamily,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mosaic mode chip
+// ---------------------------------------------------------------------------
+
+class _ModeChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _ModeChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? Colors.white.withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected ? Colors.white54 : Colors.white24,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.white70,
+            fontSize: 11,
           ),
         ),
       ),

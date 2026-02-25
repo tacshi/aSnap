@@ -16,11 +16,22 @@ Future<ui.Image> compositeAnnotations(
   final canvas = ui.Canvas(recorder);
   final size = ui.Size(source.width.toDouble(), source.height.toDouble());
 
+  // Pre-load pixel data for mosaic pixelation (compositor canvas is
+  // untransformed so drawImageRect works, but sourcePixels provides
+  // consistency with the overlay path).
+  final sourcePixels = await source.toByteData(
+    format: ui.ImageByteFormat.rawRgba,
+  );
+
   // Draw the original image at full resolution.
   canvas.drawImage(source, ui.Offset.zero, ui.Paint());
 
   // Draw annotations at image resolution.
-  final painter = AnnotationPainter(annotations: annotations);
+  final painter = AnnotationPainter(
+    annotations: annotations,
+    sourceImage: source,
+    sourcePixels: sourcePixels,
+  );
   painter.paint(canvas, size);
 
   final picture = recorder.endRecording();

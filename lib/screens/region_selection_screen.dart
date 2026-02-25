@@ -9,6 +9,7 @@ import '../models/annotation.dart';
 import '../models/annotation_handle.dart';
 import '../models/annotation_hit_test.dart';
 import '../models/selection_handle.dart';
+import '../services/window_service.dart';
 import '../state/annotation_state.dart';
 import '../widgets/annotation_overlay.dart';
 import '../widgets/selection_toolbar.dart';
@@ -65,12 +66,16 @@ class RegionSelectionScreen extends StatefulWidget {
 
   /// Annotation state for drawing shapes on the selected region.
   final AnnotationState? annotationState;
+  final WindowService windowService;
+  final Offset screenOrigin;
 
   const RegionSelectionScreen({
     super.key,
     required this.decodedImage,
     required this.windowRects,
     required this.onCancel,
+    required this.windowService,
+    required this.screenOrigin,
     this.onCopy,
     this.onSave,
     this.onRegionSelected,
@@ -85,6 +90,8 @@ class RegionSelectionScreen extends StatefulWidget {
 
 class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
   static const _channel = MethodChannel('com.asnap/window');
+  static const _toolbarSize = Size(536, 44);
+  static const _toolbarGap = 8.0;
   final _focusNode = FocusNode();
 
   // -- Interaction state --
@@ -108,7 +115,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
   // -- Annotation mode --
   ShapeType? _activeShapeType;
   bool _popoverVisible = false;
-  final _settingsLayerLink = LayerLink();
+  final _popoverAnchor = LayerLink();
   OverlayEntry? _popoverEntry;
 
   // -- Annotation handle drag state --
@@ -128,11 +135,14 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    widget.annotationState?.addListener(_handleAnnotationStateChange);
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    widget.annotationState?.removeListener(_handleAnnotationStateChange);
+    unawaited(widget.windowService.hideToolbarPanel());
     _removePopover();
     _focusNode.dispose();
     super.dispose();
@@ -762,30 +772,28 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
   }
 
   // -----------------------------------------------------------------------
-  // Toolbar positioning
+  // Native toolbar panel
   // -----------------------------------------------------------------------
 
-  /// Compute toolbar position relative to the selection rect.
+  bool get _shouldShowToolbar {
+    if (widget.isScrollSelection) return false;
+    if (_selectionRect == null) return false;
+    return _phase == _SelectionPhase.selected;
+  }
+
+  /// Compute native toolbar rect relative to the selection rect.
   /// Priority: below selection → above selection → inside (bottom edge).
-  /// Returns null if no selection exists.
-  Offset? _toolbarOffset(Size screenSize) {
+  Rect? _toolbarRect(Size screenSize) {
     final sel = _selectionRect;
     if (sel == null) return null;
 
-    // Estimate toolbar size. With annotation tools: shapes + separator + undo/redo
-    // + 3 action buttons. Without: 3 action buttons.
-    final hasAnnotationTools = widget.annotationState != null;
-    final toolbarWidth = hasAnnotationTools ? 280.0 : 130.0;
-    const toolbarHeight = 42.0;
-    const gap = 8.0;
-
-    var x = sel.center.dx - toolbarWidth / 2;
+    var x = sel.center.dx - _toolbarSize.width / 2;
     double y;
 
-    final belowY = sel.bottom + gap;
-    final aboveY = sel.top - toolbarHeight - gap;
+    final belowY = sel.bottom + _toolbarGap;
+    final aboveY = sel.top - _toolbarSize.height - _toolbarGap;
 
-    if (belowY + toolbarHeight <= screenSize.height) {
+    if (belowY + _toolbarSize.height <= screenSize.height) {
       // Fits below the selection.
       y = belowY;
     } else if (aboveY >= 0) {
@@ -794,17 +802,21 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
     } else {
       // Neither above nor below works — place inside the selection,
       // anchored to the bottom edge with an inset.
-      y = sel.bottom - toolbarHeight - gap;
+      y = sel.bottom - _toolbarSize.height - _toolbarGap;
       // Ensure it doesn't go above the selection top.
-      if (y < sel.top + gap) {
-        y = sel.top + gap;
+      if (y < sel.top + _toolbarGap) {
+        y = sel.top + _toolbarGap;
       }
     }
 
     // Clamp horizontally.
-    x = x.clamp(0, screenSize.width - toolbarWidth);
+    x = x.clamp(0, screenSize.width - _toolbarSize.width);
 
-    return Offset(x, y);
+    return Rect.fromLTWH(x, y, _toolbarSize.width, _toolbarSize.height);
+  }
+
+  void _handleAnnotationStateChange() {
+    if (mounted) setState(() {});
   }
 
   // -----------------------------------------------------------------------
@@ -858,10 +870,13 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
     _removePopover();
     _popoverVisible = true;
     _popoverEntry = OverlayEntry(
-      builder: (_) => Align(
-        alignment: Alignment.bottomCenter,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+      builder: (_) => CompositedTransformFollower(
+        link: _popoverAnchor,
+        targetAnchor: Alignment.topCenter,
+        followerAnchor: Alignment.bottomCenter,
+        offset: const Offset(0, -8),
+        child: Align(
+          alignment: Alignment.bottomCenter,
           child: ShapePopover(
             annotationState: widget.annotationState!,
             onDismiss: () {
@@ -966,6 +981,11 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
                   ),
                   enabled: _activeShapeType != null,
                   handlePointerEvents: false,
+                  sourceImage: widget.decodedImage,
+                  sourceImageOffset: Offset(
+                    _selectionRect!.left * dpr,
+                    _selectionRect!.top * dpr,
+                  ),
                 ),
               ),
 
@@ -984,44 +1004,36 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen> {
               ),
             ),
 
-            // Toolbar (only visible in selected phase) — outside the
-            // Listener so clicks reach the buttons without interference.
-            if (_phase == _SelectionPhase.selected &&
-                _selectionRect != null) ...[
+            if (_shouldShowToolbar)
               Builder(
                 builder: (context) {
-                  final offset = _toolbarOffset(screenSize);
-                  if (offset == null) return const SizedBox.shrink();
-                  final as_ = widget.annotationState;
+                  final rect = _toolbarRect(screenSize);
+                  if (rect == null) return const SizedBox.shrink();
                   return Positioned(
-                    left: offset.dx,
-                    top: offset.dy,
-                    child: as_ != null
-                        ? ListenableBuilder(
-                            listenable: as_,
-                            builder: (context, _) => SelectionToolbar(
-                              onCopy: _handleToolbarCopy,
-                              onSave: _handleToolbarSave,
-                              onClose: _handleToolbarClose,
-                              onToolTap: _handleToolTap,
-                              activeShapeType: _activeShapeType,
-                              hasAnnotations: as_.hasAnnotations,
-                              canUndo: as_.canUndo,
-                              canRedo: as_.canRedo,
-                              onUndo: as_.undo,
-                              onRedo: as_.redo,
-                              settingsLayerLink: _settingsLayerLink,
-                            ),
-                          )
-                        : SelectionToolbar(
-                            onCopy: _handleToolbarCopy,
-                            onSave: _handleToolbarSave,
-                            onClose: _handleToolbarClose,
-                          ),
+                    left: rect.left,
+                    top: rect.top,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.basic,
+                      child: SelectionToolbar(
+                        onCopy: _handleToolbarCopy,
+                        onSave: _handleToolbarSave,
+                        onClose: _handleToolbarClose,
+                        onToolTap: widget.annotationState == null
+                            ? null
+                            : (type) => _handleToolTap(type),
+                        onUndo: widget.annotationState?.undo,
+                        onRedo: widget.annotationState?.redo,
+                        activeShapeType: _activeShapeType,
+                        hasAnnotations:
+                            widget.annotationState?.hasAnnotations ?? false,
+                        canUndo: widget.annotationState?.canUndo ?? false,
+                        canRedo: widget.annotationState?.canRedo ?? false,
+                        settingsLayerLink: _popoverAnchor,
+                      ),
+                    ),
                   );
                 },
               ),
-            ],
           ],
         ),
       ),

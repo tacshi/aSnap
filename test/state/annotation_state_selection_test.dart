@@ -276,4 +276,71 @@ void main() {
       expect(state.textEditPosition, isNull);
     });
   });
+
+  group('mosaic mode color', () {
+    test('each mosaic mode keeps its own color', () {
+      final state = AnnotationState();
+      state.updateSettings(
+        state.settings.copyWith(shapeType: ShapeType.mosaic),
+      );
+
+      // Pixelate color.
+      state.updateSettings(
+        state.settings.copyWith(color: const Color(0xFF00FF00)),
+      );
+
+      // Solid color mode with its own color.
+      state.updateSettings(
+        state.settings.copyWith(mosaicMode: MosaicMode.solidColor),
+      );
+      state.updateSettings(
+        state.settings.copyWith(color: const Color(0xFF2979FF)),
+      );
+
+      // Switching back restores the pixelate color.
+      state.updateSettings(
+        state.settings.copyWith(mosaicMode: MosaicMode.pixelate),
+      );
+      expect(state.settings.color, const Color(0xFF00FF00));
+
+      // Switching again restores the solid color.
+      state.updateSettings(
+        state.settings.copyWith(mosaicMode: MosaicMode.solidColor),
+      );
+      expect(state.settings.color, const Color(0xFF2979FF));
+    });
+  });
+
+  group('tool color', () {
+    test('each tool keeps its own color', () {
+      final state = AnnotationState();
+      // Rectangle (default tool) -> green.
+      state.updateSettings(
+        state.settings.copyWith(color: const Color(0xFF00FF00)),
+      );
+
+      // Switch to ellipse: should use default color, not rectangle's green.
+      state.updateSettings(
+        state.settings.copyWith(shapeType: ShapeType.ellipse),
+      );
+      expect(state.settings.color, const Color(0xFFFF0000));
+
+      // Set ellipse to blue.
+      state.updateSettings(
+        state.settings.copyWith(color: const Color(0xFF2979FF)),
+      );
+
+      // Switch back to rectangle restores green.
+      state.updateSettings(
+        state.settings.copyWith(shapeType: ShapeType.rectangle),
+      );
+      expect(state.settings.color, const Color(0xFF00FF00));
+
+      // Switch back to ellipse restores blue.
+      state.updateSettings(
+        state.settings.copyWith(shapeType: ShapeType.ellipse),
+      );
+      expect(state.settings.color, const Color(0xFF2979FF));
+    });
+  });
 }

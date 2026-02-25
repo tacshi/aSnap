@@ -71,6 +71,28 @@ void main() {
       expect(handles.any((h) => h.type == AnnHandleType.controlPoint), true);
     });
 
+    test('mosaic returns 8 handles (corners + edge midpoints)', () {
+      const a = Annotation(
+        type: ShapeType.mosaic,
+        start: Offset(10, 10),
+        end: Offset(110, 60),
+        color: Color(0xFFFF0000),
+        strokeWidth: 8,
+      );
+      final handles = annotationHandles(a);
+      expect(handles.length, 8);
+      expect(handles.map((h) => h.type).toSet(), {
+        AnnHandleType.topLeft,
+        AnnHandleType.topRight,
+        AnnHandleType.bottomLeft,
+        AnnHandleType.bottomRight,
+        AnnHandleType.top,
+        AnnHandleType.right,
+        AnnHandleType.bottom,
+        AnnHandleType.left,
+      });
+    });
+
     test('number stamp returns no handles', () {
       const a = Annotation(
         type: ShapeType.number,

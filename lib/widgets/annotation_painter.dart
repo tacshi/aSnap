@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -14,11 +15,17 @@ class AnnotationPainter extends CustomPainter {
   final List<Annotation> annotations;
   final Annotation? activeAnnotation;
   final int? selectedIndex;
+  final ui.Image? sourceImage; // Original screenshot for mosaic/blur
+  final ByteData? sourcePixels; // Raw RGBA pixels for mosaic pixelation
+  final Offset sourceImageOffset; // Annotation-space origin in sourceImage.
 
   AnnotationPainter({
     required this.annotations,
     this.activeAnnotation,
     this.selectedIndex,
+    this.sourceImage,
+    this.sourcePixels,
+    this.sourceImageOffset = Offset.zero,
   });
 
   @override
@@ -81,6 +88,9 @@ class AnnotationPainter extends CustomPainter {
 
       case ShapeType.marker:
         _drawMarker(canvas, annotation, paint);
+
+      case ShapeType.mosaic:
+        _drawMosaic(canvas, annotation);
 
       case ShapeType.number:
         _drawNumberStamp(canvas, annotation);
@@ -224,6 +234,105 @@ class AnnotationPainter extends CustomPainter {
     canvas.restore();
   }
 
+  void _drawMosaic(Canvas canvas, Annotation a) {
+    final rect = _normalizedRect(a);
+    final rrect = a.cornerRadius > 0
+        ? RRect.fromRectAndRadius(rect, Radius.circular(a.cornerRadius))
+        : RRect.fromRectAndRadius(rect, Radius.zero);
+
+    canvas.save();
+    canvas.clipRRect(rrect);
+
+    switch (a.mosaicMode) {
+      case MosaicMode.solidColor:
+        canvas.drawRect(rect, Paint()..color = a.color);
+
+      case MosaicMode.blur:
+        if (sourceImage != null) {
+          final sigma = a.strokeWidth * 1.5;
+          final matrix = Float64List.fromList([
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            -sourceImageOffset.dx,
+            -sourceImageOffset.dy,
+            0,
+            1,
+          ]);
+          // ImageShader + saveLayer + drawRect avoids drawImage/drawImageRect
+          // which fail silently in transformed canvases (translate + scale).
+          // The shader maps image pixels 1:1 to local annotation coords.
+          // sourceImageOffset aligns local (selection-relative) coords with
+          // the correct location in the underlying source image.
+          final shader = ui.ImageShader(
+            sourceImage!,
+            TileMode.clamp,
+            TileMode.clamp,
+            matrix,
+          );
+          canvas.saveLayer(
+            rect,
+            Paint()
+              ..imageFilter = ui.ImageFilter.blur(
+                sigmaX: sigma,
+                sigmaY: sigma,
+                tileMode: TileMode.clamp,
+              ),
+          );
+          canvas.drawRect(rect, Paint()..shader = shader);
+          canvas.restore();
+        }
+
+      case MosaicMode.pixelate:
+        if (sourceImage != null && sourcePixels != null) {
+          // Sample pixel colors from pre-loaded RGBA ByteData and draw
+          // colored blocks. Avoids drawImageRect which fails silently
+          // in transformed canvases.
+          final imgW = sourceImage!.width;
+          final blockSize = a.strokeWidth.clamp(2.0, 50.0);
+          final pixels = sourcePixels!;
+          for (double y = rect.top; y < rect.bottom; y += blockSize) {
+            for (double x = rect.left; x < rect.right; x += blockSize) {
+              final bw = (x + blockSize).clamp(rect.left, rect.right) - x;
+              final bh = (y + blockSize).clamp(rect.top, rect.bottom) - y;
+              final blockRect = Rect.fromLTWH(x, y, bw, bh);
+              final cx = (x + bw / 2 + sourceImageOffset.dx)
+                  .clamp(0, sourceImage!.width - 1)
+                  .toInt();
+              final cy = (y + bh / 2 + sourceImageOffset.dy)
+                  .clamp(0, sourceImage!.height - 1)
+                  .toInt();
+              canvas.drawRect(
+                blockRect,
+                Paint()..color = _samplePixel(pixels, imgW, cx, cy),
+              );
+            }
+          }
+        }
+    }
+    canvas.restore();
+  }
+
+  /// Read one pixel from raw RGBA [ByteData].
+  static Color _samplePixel(ByteData pixels, int imageWidth, int x, int y) {
+    final offset = (y * imageWidth + x) * 4;
+    return Color.fromARGB(
+      pixels.getUint8(offset + 3),
+      pixels.getUint8(offset),
+      pixels.getUint8(offset + 1),
+      pixels.getUint8(offset + 2),
+    );
+  }
+
   void _drawNumberStamp(Canvas canvas, Annotation a) {
     final radius = a.stampRadius;
     final center = a.start;
@@ -341,6 +450,9 @@ class AnnotationPainter extends CustomPainter {
   bool shouldRepaint(AnnotationPainter oldDelegate) {
     return !identical(annotations, oldDelegate.annotations) ||
         activeAnnotation != oldDelegate.activeAnnotation ||
-        selectedIndex != oldDelegate.selectedIndex;
+        selectedIndex != oldDelegate.selectedIndex ||
+        !identical(sourceImage, oldDelegate.sourceImage) ||
+        !identical(sourcePixels, oldDelegate.sourcePixels) ||
+        sourceImageOffset != oldDelegate.sourceImageOffset;
   }
 }

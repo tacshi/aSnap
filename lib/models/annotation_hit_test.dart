@@ -36,6 +36,9 @@ bool _hitTestShape(Offset point, Annotation annotation, double threshold) {
     case ShapeType.pencil:
     case ShapeType.marker:
       return _distanceToPolyline(point, annotation) <= t;
+    case ShapeType.mosaic:
+      final mosaicRect = Rect.fromPoints(annotation.start, annotation.end);
+      return mosaicRect.inflate(2).contains(point);
     case ShapeType.number:
       return (point - annotation.start).distance <= annotation.stampRadius + 2;
     case ShapeType.text:

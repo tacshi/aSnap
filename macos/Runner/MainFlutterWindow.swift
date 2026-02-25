@@ -1,6 +1,7 @@
 import ApplicationServices
 import Cocoa
 import CoreGraphics
+import CoreText
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
@@ -33,6 +34,39 @@ class MainFlutterWindow: NSWindow {
   // preview window so it can be dragged outside preview bounds.
   private var toolbarPanel: NSPanel?
   private var toolbarContentView: NSView?  // ToolbarContentView (macOS 11+)
+  private var toolbarHitTestMonitor: Any?
+  private var overlayIgnoresMouseForToolbar = false
+
+  private func screenAndBounds(forCGPoint point: CGPoint) -> (NSScreen, CGRect)? {
+    for screen in NSScreen.screens {
+      guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+        continue
+      }
+      let bounds = CGDisplayBounds(id.uint32Value)
+      if bounds.contains(point) {
+        return (screen, bounds)
+      }
+    }
+    if let main = NSScreen.main,
+       let id = main.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+      return (main, CGDisplayBounds(id.uint32Value))
+    }
+    return nil
+  }
+
+  /// Convert a CG-space rect (top-left origin) into an NS-space origin
+  /// for positioning panels in global coordinates.
+  private func nsOrigin(forCGTopLeftRect rect: CGRect) -> NSPoint {
+    let cgPoint = rect.origin
+    if let (screen, bounds) = screenAndBounds(forCGPoint: cgPoint) {
+      let screenFrame = screen.frame
+      let nsX = screenFrame.minX + (cgPoint.x - bounds.origin.x)
+      let nsY = screenFrame.maxY - (cgPoint.y - bounds.origin.y) - rect.size.height
+      return NSPoint(x: nsX, y: nsY)
+    }
+    let screenHeight = NSScreen.main?.frame.height ?? 0
+    return NSPoint(x: rect.origin.x, y: screenHeight - rect.origin.y - rect.size.height)
+  }
 
   /// Append a debug line to ~/asnap_overlay.log (debug builds only).
   private static func log(_ msg: String) {
@@ -557,17 +591,17 @@ class MainFlutterWindow: NSWindow {
         }
 
         // Convert CG coordinates (top-left origin) to NS coordinates (bottom-left).
-        let screenHeight = NSScreen.main?.frame.height ?? 0
-        let nsY = screenHeight - cgY - h
+        let cgRect = CGRect(x: cgX, y: cgY, width: w, height: h)
+        let nsOrigin = self.nsOrigin(forCGTopLeftRect: cgRect)
 
         // Reuse existing panel or create a new one.
         let panel: NSPanel
         if let existing = self.scrollStopPanel {
           panel = existing
-          panel.setFrame(NSRect(x: cgX, y: nsY, width: w, height: h), display: true)
+          panel.setFrame(NSRect(x: nsOrigin.x, y: nsOrigin.y, width: w, height: h), display: true)
         } else {
           panel = NSPanel(
-            contentRect: NSRect(x: cgX, y: nsY, width: w, height: h),
+            contentRect: NSRect(x: nsOrigin.x, y: nsOrigin.y, width: w, height: h),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -604,31 +638,58 @@ class MainFlutterWindow: NSWindow {
           result(nil); return
         }
 
-        let panelWidth: CGFloat = 500
+        let panelWidth: CGFloat = 536
         let panelHeight: CGFloat = 44
-        let x = centerX - panelWidth / 2
-
-        // Convert CG coordinates (top-left origin) to NS coordinates (bottom-left).
-        let screenHeight = self.overlayScreenFrame?.height ?? NSScreen.main?.frame.height ?? 0
-        let nsY = screenHeight - belowY - panelHeight
+        let cgRect = CGRect(
+          x: centerX - panelWidth / 2,
+          y: belowY,
+          width: panelWidth,
+          height: panelHeight
+        )
+        let nsOrigin = self.nsOrigin(forCGTopLeftRect: cgRect)
+        let overlayActive = self.overlayScreenFrame != nil
+        let panelLevel: NSWindow.Level
+        if overlayActive {
+          panelLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)))
+        } else {
+          panelLevel = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+        }
+        let panelBehavior: NSWindow.CollectionBehavior = overlayActive
+          ? [.canJoinAllSpaces, .fullScreenAuxiliary]
+          : [.moveToActiveSpace]
 
         if let existing = self.toolbarPanel {
-          existing.setFrame(NSRect(x: x, y: nsY, width: panelWidth, height: panelHeight), display: true)
+          existing.setFrame(
+            NSRect(x: nsOrigin.x, y: nsOrigin.y, width: panelWidth, height: panelHeight),
+            display: true
+          )
+          existing.level = panelLevel
+          existing.collectionBehavior = panelBehavior
+          existing.ignoresMouseEvents = false
+          existing.becomesKeyOnlyIfNeeded = true
+          existing.acceptsMouseMovedEvents = true
           existing.orderFront(nil)
         } else {
           let panel = NSPanel(
-            contentRect: NSRect(x: x, y: nsY, width: panelWidth, height: panelHeight),
+            contentRect: NSRect(
+              x: nsOrigin.x,
+              y: nsOrigin.y,
+              width: panelWidth,
+              height: panelHeight
+            ),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
           )
-          panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+          panel.level = panelLevel
           panel.backgroundColor = .clear
           panel.isOpaque = false
           panel.hasShadow = true
           panel.isMovableByWindowBackground = true
-          panel.collectionBehavior = [.moveToActiveSpace]
+          panel.collectionBehavior = panelBehavior
           panel.ignoresMouseEvents = false
+          panel.becomesKeyOnlyIfNeeded = true
+          panel.acceptsMouseMovedEvents = true
 
           let contentView = ToolbarContentView(
             frame: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight)
@@ -644,12 +705,15 @@ class MainFlutterWindow: NSWindow {
           self.toolbarContentView = contentView
           panel.orderFront(nil)
         }
+        self.installToolbarHitTestMonitor()
+        self.updateToolbarHitTesting()
         result(nil)
 
       case "hideToolbarPanel":
         self.toolbarPanel?.close()
         self.toolbarPanel = nil
         self.toolbarContentView = nil
+        self.removeToolbarHitTestMonitor()
         result(nil)
 
       case "updateToolbarState":
@@ -1013,6 +1077,7 @@ class MainFlutterWindow: NSWindow {
     self.toolbarPanel?.close()
     self.toolbarPanel = nil
     self.toolbarContentView = nil
+    self.removeToolbarHitTestMonitor()
     // Remove space-change observer
     if let obs = self.spaceChangeObserver {
       NSWorkspace.shared.notificationCenter.removeObserver(obs)
@@ -1050,6 +1115,48 @@ class MainFlutterWindow: NSWindow {
     self.collectionBehavior = [.moveToActiveSpace]
     self.ignoresMouseEvents = false
     self.acceptsMouseMovedEvents = false
+  }
+
+  // MARK: - Toolbar hit testing
+
+  private func installToolbarHitTestMonitor() {
+    if toolbarHitTestMonitor != nil { return }
+    toolbarHitTestMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .leftMouseDown]
+    ) { [weak self] event in
+      self?.updateToolbarHitTesting()
+      return event
+    }
+  }
+
+  private func removeToolbarHitTestMonitor() {
+    if let monitor = toolbarHitTestMonitor {
+      NSEvent.removeMonitor(monitor)
+      toolbarHitTestMonitor = nil
+    }
+    if overlayIgnoresMouseForToolbar {
+      overlayIgnoresMouseForToolbar = false
+      self.ignoresMouseEvents = false
+    }
+  }
+
+  private func updateToolbarHitTesting() {
+    guard let panel = toolbarPanel, panel.isVisible else {
+      if overlayIgnoresMouseForToolbar {
+        overlayIgnoresMouseForToolbar = false
+        self.ignoresMouseEvents = false
+      }
+      return
+    }
+    let mouse = NSEvent.mouseLocation
+    let isOverToolbar = panel.frame.contains(mouse)
+    if isOverToolbar && !overlayIgnoresMouseForToolbar {
+      overlayIgnoresMouseForToolbar = true
+      self.ignoresMouseEvents = true
+    } else if !isOverToolbar && overlayIgnoresMouseForToolbar {
+      overlayIgnoresMouseForToolbar = false
+      self.ignoresMouseEvents = false
+    }
   }
 
   // MARK: - Cursor helpers
@@ -1133,7 +1240,7 @@ class MainFlutterWindow: NSWindow {
     self.isMovableByWindowBackground = false
     self.minSize = NSSize(width: 1, height: 1)
     self.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-    self.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)))
+    self.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)) - 1)
     self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     self.ignoresMouseEvents = false
     self.acceptsMouseMovedEvents = true
@@ -1218,6 +1325,39 @@ private class ScrollStopClickView: NSView {
 /// SF Symbol icon buttons.  Lives inside a borderless NSPanel that floats
 /// independently of the Flutter preview window.
 @available(macOS 11.0, *)
+private struct MaterialIconFont {
+  static let cgFont: CGFont? = {
+    let bundles = [Bundle.main] + Bundle.allFrameworks
+    for bundle in bundles {
+      if let url = bundle.url(forResource: "MaterialIcons-Regular",
+                              withExtension: "otf",
+                              subdirectory: "flutter_assets/fonts") ??
+          bundle.url(forResource: "MaterialIcons-Regular",
+                     withExtension: "otf") {
+        if let provider = CGDataProvider(url: url as CFURL),
+           let font = CGFont(provider) {
+          return font
+        }
+      }
+    }
+    return nil
+  }()
+
+  static func font(size: CGFloat) -> NSFont? {
+    guard let cgFont else { return nil }
+    let ctFont = CTFontCreateWithGraphicsFont(cgFont, size, nil, nil)
+    return ctFont as NSFont
+  }
+}
+
+@available(macOS 11.0, *)
+private class ToolbarButton: NSButton {
+  // Allow clicks even when the toolbar panel can't become key.
+  // Non-activating panels discard mouseDown by default.
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+@available(macOS 11.0, *)
 private class ToolbarContentView: NSView {
 
   /// Fired when a button is tapped; argument is the action string
@@ -1225,15 +1365,37 @@ private class ToolbarContentView: NSView {
   var onAction: ((String) -> Void)?
 
   // ── Action string mapping ──
-  private static let toolActions: [(symbol: String, action: String, label: String)] = [
-    ("rectangle",            "toolTap:rectangle", "Rectangle"),
-    ("circle",               "toolTap:ellipse",   "Ellipse"),
-    ("arrow.right",          "toolTap:arrow",     "Arrow"),
-    ("minus",                "toolTap:line",      "Line"),
-    ("pencil",               "toolTap:pencil",    "Pencil"),
-    ("paintbrush.pointed",   "toolTap:marker",    "Marker"),
-    ("1.circle",             "toolTap:number",    "Number"),
-    ("textformat",           "toolTap:text",      "Text"),
+  private enum ToolbarIcon {
+    case material(Int)
+    case circledOne
+  }
+
+  private enum MaterialIcon {
+    static let rectangleOutlined = 0xf0650
+    static let circleOutlined = 0xef53
+    static let arrowRightAltRounded = 0xf57c
+    static let horizontalRuleRounded = 0xf7f8
+    static let editOutlined = 0xf00d
+    static let brushOutlined = 0xef02
+    static let blurOnRounded = 0xf5c9
+    static let textFieldsRounded = 0xf021e
+    static let undoRounded = 0xf0261
+    static let redoRounded = 0xf00e7
+    static let copyRounded = 0xf66c
+    static let saveAltRounded = 0xf0125
+    static let closeRounded = 0xf647
+  }
+
+  private static let toolActions: [(icon: ToolbarIcon, action: String, label: String)] = [
+    (.material(MaterialIcon.rectangleOutlined), "toolTap:rectangle", "Rectangle"),
+    (.material(MaterialIcon.circleOutlined), "toolTap:ellipse", "Ellipse"),
+    (.material(MaterialIcon.arrowRightAltRounded), "toolTap:arrow", "Arrow"),
+    (.material(MaterialIcon.horizontalRuleRounded), "toolTap:line", "Line"),
+    (.material(MaterialIcon.editOutlined), "toolTap:pencil", "Pencil"),
+    (.material(MaterialIcon.brushOutlined), "toolTap:marker", "Marker"),
+    (.material(MaterialIcon.blurOnRounded), "toolTap:mosaic", "Mosaic"),
+    (.circledOne, "toolTap:number", "Number"),
+    (.material(MaterialIcon.textFieldsRounded), "toolTap:text", "Text"),
   ]
 
   // ── Buttons ──
@@ -1247,9 +1409,14 @@ private class ToolbarContentView: NSView {
   // ── Active-tool highlight layers (one per tool button) ──
   private var highlightLayers: [CALayer] = []
   private var activeTool: String?
+  private var trackingAreaRef: NSTrackingArea?
+  private var cursorPushed = false
 
   override var isOpaque: Bool { false }
   override func draw(_ dirtyRect: NSRect) { /* empty — layer draws background */ }
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+  override var acceptsFirstResponder: Bool { true }
+  override var needsPanelToBecomeKey: Bool { true }
 
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -1278,7 +1445,7 @@ private class ToolbarContentView: NSView {
 
     // ── Tool buttons ──
     for (index, tool) in Self.toolActions.enumerated() {
-      let btn = makeButton(symbol: tool.symbol, tooltip: tool.label, tag: index)
+      let btn = makeButton(icon: tool.icon, tooltip: tool.label, tag: index)
       toolButtons.append(btn)
       stack.addArrangedSubview(btn)
     }
@@ -1290,8 +1457,16 @@ private class ToolbarContentView: NSView {
     stack.addArrangedSubview(spacer1)
 
     // ── Undo / Redo ──
-    undoButton = makeButton(symbol: "arrow.uturn.backward", tooltip: "Undo", tag: 100)
-    redoButton = makeButton(symbol: "arrow.uturn.forward", tooltip: "Redo", tag: 101)
+    undoButton = makeButton(
+      icon: .material(MaterialIcon.undoRounded),
+      tooltip: "Undo",
+      tag: 100
+    )
+    redoButton = makeButton(
+      icon: .material(MaterialIcon.redoRounded),
+      tooltip: "Redo",
+      tag: 101
+    )
     undoButton.isEnabled = false
     redoButton.isEnabled = false
     stack.addArrangedSubview(undoButton)
@@ -1317,9 +1492,21 @@ private class ToolbarContentView: NSView {
     stack.addArrangedSubview(dividerWrap)
 
     // ── Action buttons ──
-    copyButton = makeButton(symbol: "doc.on.doc", tooltip: "Copy", tag: 200)
-    saveButton = makeButton(symbol: "square.and.arrow.down", tooltip: "Save", tag: 201)
-    discardButton = makeButton(symbol: "xmark", tooltip: "Discard", tag: 202)
+    copyButton = makeButton(
+      icon: .material(MaterialIcon.copyRounded),
+      tooltip: "Copy",
+      tag: 200
+    )
+    saveButton = makeButton(
+      icon: .material(MaterialIcon.saveAltRounded),
+      tooltip: "Save",
+      tag: 201
+    )
+    discardButton = makeButton(
+      icon: .material(MaterialIcon.closeRounded),
+      tooltip: "Discard",
+      tag: 202
+    )
     discardButton.contentTintColor = NSColor(red: 0.94, green: 0.6, blue: 0.6, alpha: 1.0)
     stack.addArrangedSubview(copyButton)
     stack.addArrangedSubview(saveButton)
@@ -1347,10 +1534,26 @@ private class ToolbarContentView: NSView {
     }
   }
 
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingAreaRef {
+      removeTrackingArea(trackingAreaRef)
+    }
+    let options: NSTrackingArea.Options = [
+      .activeAlways,
+      .mouseEnteredAndExited,
+      .cursorUpdate,
+      .inVisibleRect,
+    ]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    addTrackingArea(area)
+    trackingAreaRef = area
+  }
+
   // ── Button factory ──
 
-  private func makeButton(symbol: String, tooltip: String, tag: Int) -> NSButton {
-    let btn = NSButton(frame: NSRect(x: 0, y: 0, width: 34, height: 34))
+  private func makeButton(icon: ToolbarIcon, tooltip: String, tag: Int) -> NSButton {
+    let btn = ToolbarButton(frame: NSRect(x: 0, y: 0, width: 34, height: 34))
     btn.bezelStyle = .regularSquare
     btn.isBordered = false
     btn.imagePosition = .imageOnly
@@ -1364,13 +1567,85 @@ private class ToolbarContentView: NSView {
     btn.translatesAutoresizingMaskIntoConstraints = false
     btn.widthAnchor.constraint(equalToConstant: 34).isActive = true
     btn.heightAnchor.constraint(equalToConstant: 34).isActive = true
-
-    let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-    if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip) {
-      btn.image = img.withSymbolConfiguration(config) ?? img
+    btn.image = iconImage(for: icon, tooltip: tooltip)
+    if btn.image == nil {
+      btn.title = tooltip
+      btn.imagePosition = .noImage
+      btn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
     }
     btn.contentTintColor = .white
     return btn
+  }
+
+  private func iconImage(for icon: ToolbarIcon, tooltip: String) -> NSImage? {
+    switch icon {
+    case .material(let codepoint):
+      return materialIconImage(codepoint: codepoint)
+    case .circledOne:
+      return circledOneImage()
+    }
+  }
+
+  private func materialIconImage(codepoint: Int) -> NSImage? {
+    guard let scalar = UnicodeScalar(codepoint),
+          let font = MaterialIconFont.font(size: 18) else {
+      return nil
+    }
+    let string = String(scalar)
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: font,
+      .foregroundColor: NSColor.white
+    ]
+    let attributed = NSAttributedString(string: string, attributes: attributes)
+    let glyphSize = attributed.size()
+    let pad: CGFloat = 2
+    let imageSize = NSSize(
+      width: ceil(glyphSize.width + pad),
+      height: ceil(glyphSize.height + pad)
+    )
+    let image = NSImage(size: imageSize)
+    image.lockFocus()
+    let origin = NSPoint(
+      x: (imageSize.width - glyphSize.width) / 2,
+      y: (imageSize.height - glyphSize.height) / 2
+    )
+    attributed.draw(at: origin)
+    image.unlockFocus()
+    image.isTemplate = true
+    return image
+  }
+
+  private func circledOneImage() -> NSImage {
+    let size: CGFloat = 18
+    let strokeWidth: CGFloat = 1.5
+    let image = NSImage(size: NSSize(width: size, height: size))
+    image.lockFocus()
+    let inset = strokeWidth / 2
+    let rect = NSRect(
+      x: inset,
+      y: inset,
+      width: size - strokeWidth,
+      height: size - strokeWidth
+    )
+    let path = NSBezierPath(ovalIn: rect)
+    NSColor.white.setStroke()
+    path.lineWidth = strokeWidth
+    path.stroke()
+    let text = "1"
+    let font = NSFont.systemFont(ofSize: size * 0.55, weight: .bold)
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: font,
+      .foregroundColor: NSColor.white
+    ]
+    let textSize = text.size(withAttributes: attributes)
+    let origin = NSPoint(
+      x: (size - textSize.width) / 2,
+      y: (size - textSize.height) / 2 - 1
+    )
+    text.draw(at: origin, withAttributes: attributes)
+    image.unlockFocus()
+    image.isTemplate = true
+    return image
   }
 
   // ── Click handler ──
@@ -1417,5 +1692,25 @@ private class ToolbarContentView: NSView {
 
   override func resetCursorRects() {
     addCursorRect(bounds, cursor: .arrow)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    if !cursorPushed {
+      NSCursor.arrow.push()
+      cursorPushed = true
+    }
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    if cursorPushed {
+      NSCursor.pop()
+      cursorPushed = false
+    }
+  }
+
+  override func cursorUpdate(with event: NSEvent) {
+    NSCursor.arrow.set()
   }
 }
