@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,9 @@ import 'package:window_manager/window_manager.dart';
 
 import '../state/annotation_state.dart';
 import '../state/app_state.dart';
+import '../services/window_service.dart';
+import '../utils/toolbar_actions.dart';
+import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
 import '../widgets/selection_toolbar.dart';
 import '../widgets/tool_popover_mixin.dart';
@@ -21,6 +25,8 @@ class PreviewScreen extends StatefulWidget {
   final VoidCallback onSave;
   final VoidCallback? onPin;
   final VoidCallback onDiscard;
+  final WindowService windowService;
+  final bool useNativeToolbar;
 
   const PreviewScreen({
     super.key,
@@ -30,13 +36,16 @@ class PreviewScreen extends StatefulWidget {
     required this.onSave,
     this.onPin,
     required this.onDiscard,
+    required this.windowService,
+    required this.useNativeToolbar,
   });
 
   @override
   State<PreviewScreen> createState() => _PreviewScreenState();
 }
 
-class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
+class _PreviewScreenState extends State<PreviewScreen>
+    with ToolPopoverMixin, WindowListener {
   final _focusNode = FocusNode();
   bool _focusRetryRunning = false;
 
@@ -44,6 +53,11 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
 
   /// Tracks the last image to detect capture changes and reset annotation UI.
   ui.Image? _lastImage;
+
+  // -- Native toolbar state --
+  Rect? _lastNativeToolbarCgRect;
+  bool _nativeToolbarVisible = false;
+  Offset? _toolbarAnchorOffset;
 
   @override
   AnnotationState get popoverAnnotationState => widget.annotationState;
@@ -55,11 +69,27 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    if (widget.useNativeToolbar) {
+      widget.windowService.onToolbarAction = _handleNativeToolbarAction;
+      widget.windowService.onToolbarNeedsUpdate = _handleToolbarNeedsUpdate;
+      windowManager.addListener(this);
+    }
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    if (widget.windowService.onToolbarAction == _handleNativeToolbarAction) {
+      widget.windowService.onToolbarAction = null;
+    }
+    if (widget.windowService.onToolbarNeedsUpdate ==
+        _handleToolbarNeedsUpdate) {
+      widget.windowService.onToolbarNeedsUpdate = null;
+    }
+    if (widget.useNativeToolbar) {
+      windowManager.removeListener(this);
+      unawaited(widget.windowService.hideToolbarPanel());
+    }
     removePopover();
     _focusNode.dispose();
     super.dispose();
@@ -161,6 +191,143 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
   }
 
   // ---------------------------------------------------------------------------
+  // Native toolbar
+  // ---------------------------------------------------------------------------
+
+  void _syncNativeToolbarState() {
+    final state = widget.annotationState;
+    if (!widget.useNativeToolbar) return;
+    unawaited(
+      widget.windowService.updateToolbarState(
+        activeTool: shapeTypeToToolId(activeShapeType),
+        canUndo: state.canUndo,
+        canRedo: state.canRedo,
+        hasAnnotations: state.hasAnnotations,
+        showsPin: widget.onPin != null,
+      ),
+    );
+  }
+
+  Future<void> _updateNativeToolbarPlacement() async {
+    if (!widget.useNativeToolbar) return;
+    if (!widget.windowService.toolbarUpdatesEnabled) return;
+    if (widget.appState.capturedImage == null) {
+      _hideNativeToolbar();
+      return;
+    }
+    final windowPos = await windowManager.getPosition();
+    final windowSize = await windowManager.getSize();
+    final windowRect = Rect.fromLTWH(
+      windowPos.dx,
+      windowPos.dy,
+      windowSize.width,
+      windowSize.height,
+    );
+    final screenInfo =
+        await widget.windowService.getScreenInfoForRect(windowRect) ??
+        await widget.windowService.getScreenInfo();
+    if (screenInfo == null) return;
+
+    final screenRect = Rect.fromLTWH(
+      screenInfo.screenOrigin.dx,
+      screenInfo.screenOrigin.dy,
+      screenInfo.screenSize.width,
+      screenInfo.screenSize.height,
+    );
+
+    final cgRect = computeToolbarRectBelowWindow(
+      windowRect: windowRect,
+      screenRect: screenRect,
+    );
+
+    final anchorX = (cgRect.center.dx - windowPos.dx).clamp(
+      0.0,
+      windowSize.width - 1,
+    );
+    final anchorY = (windowSize.height - 1).clamp(0.0, windowSize.height);
+    final newAnchor = Offset(anchorX, anchorY);
+    if (_toolbarAnchorOffset != newAnchor) {
+      _toolbarAnchorOffset = newAnchor;
+      if (mounted) {
+        setState(() {});
+      }
+    }
+
+    if (_nativeToolbarVisible && _lastNativeToolbarCgRect == cgRect) {
+      _syncNativeToolbarState();
+      return;
+    }
+
+    _nativeToolbarVisible = true;
+    _lastNativeToolbarCgRect = cgRect;
+    await widget.windowService.showToolbarPanel(
+      centerX: cgRect.center.dx,
+      belowY: cgRect.top,
+    );
+    _syncNativeToolbarState();
+  }
+
+  void _handleToolbarNeedsUpdate() {
+    unawaited(_updateNativeToolbarPlacement());
+  }
+
+  void _hideNativeToolbar() {
+    if (!_nativeToolbarVisible) return;
+    _nativeToolbarVisible = false;
+    _lastNativeToolbarCgRect = null;
+    unawaited(widget.windowService.hideToolbarPanel());
+  }
+
+  void _handleNativeToolbarAction(String action) {
+    if (action.startsWith('toolTap:')) {
+      final toolId = action.substring('toolTap:'.length);
+      final type = toolIdToShapeType(toolId);
+      if (type != null) handleToolTap(type);
+      return;
+    }
+    switch (action) {
+      case 'undo':
+        widget.annotationState.undo();
+        break;
+      case 'redo':
+        widget.annotationState.redo();
+        break;
+      case 'copy':
+        widget.onCopy();
+        break;
+      case 'save':
+        widget.onSave();
+        break;
+      case 'pin':
+        widget.onPin?.call();
+        break;
+      case 'discard':
+        widget.onDiscard();
+        break;
+    }
+  }
+
+  @override
+  void onWindowMove() {
+    unawaited(_updateNativeToolbarPlacement());
+  }
+
+  @override
+  void onWindowResize() {
+    unawaited(_updateNativeToolbarPlacement());
+  }
+
+  @override
+  void onWindowMoved() {
+    unawaited(_updateNativeToolbarPlacement());
+  }
+
+  @override
+  void onWindowResized() {
+    unawaited(_updateNativeToolbarPlacement());
+  }
+
+  // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
 
@@ -172,6 +339,11 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
         final image = widget.appState.capturedImage;
         if (image == null) {
           _lastImage = null;
+          if (widget.useNativeToolbar) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _hideNativeToolbar();
+            });
+          }
           return const ColoredBox(color: Color(0xFF1E1E1E));
         }
 
@@ -202,14 +374,20 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
                 fitted.destination,
                 Offset.zero & constraints.biggest,
               );
+              final fallbackToolbarRect = computeToolbarRect(
+                anchorRect: imageDisplayRect,
+                screenSize: constraints.biggest,
+              );
+              if (widget.useNativeToolbar) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) unawaited(_updateNativeToolbarPlacement());
+                });
+                _syncNativeToolbarState();
+              }
 
               return Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Window drag area (only when NOT drawing).
-                  if (activeShapeType == null)
-                    DragToMoveArea(child: const SizedBox.expand()),
-
                   // Screenshot image.
                   RawImage(image: image, fit: BoxFit.contain),
 
@@ -222,14 +400,30 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
                     sourceImage: image,
                   ),
 
-                  // Toolbar — bottom center of the window.
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 12,
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.basic,
-                      child: Center(
+                  if (widget.useNativeToolbar)
+                    Positioned(
+                      left:
+                          _toolbarAnchorOffset?.dx ??
+                          (constraints.biggest.width / 2),
+                      top:
+                          _toolbarAnchorOffset?.dy ??
+                          (constraints.biggest.height - 1),
+                      width: 1,
+                      height: 1,
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: CompositedTransformTarget(
+                          link: _popoverAnchorLink,
+                          child: const SizedBox(width: 1, height: 1),
+                        ),
+                      ),
+                    )
+                  else
+                    Positioned(
+                      left: fallbackToolbarRect.left,
+                      top: fallbackToolbarRect.top,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.basic,
                         child: SelectionToolbar(
                           onCopy: widget.onCopy,
                           onSave: widget.onSave,
@@ -246,7 +440,13 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
                         ),
                       ),
                     ),
-                  ),
+
+                  // Window drag area (only when NOT drawing) — keep on top so it
+                  // receives pointer events even when the image covers the window.
+                  if (activeShapeType == null)
+                    Positioned.fill(
+                      child: DragToMoveArea(child: const SizedBox.expand()),
+                    ),
                 ],
               );
             },

@@ -63,6 +63,10 @@ List<AnnHandle> annotationHandles(Annotation annotation) {
         AnnHandle(AnnHandleType.topRight, rect.topRight),
         AnnHandle(AnnHandleType.bottomLeft, rect.bottomLeft),
         AnnHandle(AnnHandleType.bottomRight, rect.bottomRight),
+        AnnHandle(AnnHandleType.top, Offset(rect.center.dx, rect.top)),
+        AnnHandle(AnnHandleType.right, Offset(rect.right, rect.center.dy)),
+        AnnHandle(AnnHandleType.bottom, Offset(rect.center.dx, rect.bottom)),
+        AnnHandle(AnnHandleType.left, Offset(rect.left, rect.center.dy)),
       ];
     case ShapeType.ellipse:
       return [
@@ -89,6 +93,10 @@ List<AnnHandle> annotationHandles(Annotation annotation) {
         AnnHandle(AnnHandleType.topRight, rect.topRight),
         AnnHandle(AnnHandleType.bottomLeft, rect.bottomLeft),
         AnnHandle(AnnHandleType.bottomRight, rect.bottomRight),
+        AnnHandle(AnnHandleType.top, Offset(rect.center.dx, rect.top)),
+        AnnHandle(AnnHandleType.right, Offset(rect.right, rect.center.dy)),
+        AnnHandle(AnnHandleType.bottom, Offset(rect.center.dx, rect.bottom)),
+        AnnHandle(AnnHandleType.left, Offset(rect.left, rect.center.dy)),
       ];
     case ShapeType.text:
     case ShapeType.pencil:

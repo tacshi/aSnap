@@ -16,6 +16,7 @@ import 'services/window_service.dart';
 import 'state/annotation_state.dart';
 import 'state/app_state.dart';
 import 'utils/annotation_compositor.dart';
+import 'utils/toolbar_layout.dart';
 
 bool _displayChangeInProgress = false;
 bool _displayChangePending = false;
@@ -33,6 +34,7 @@ ui.Image? _lastCopiedImage;
 
 /// CG-coordinate frame of the last copied image (for pin placement).
 Rect? _lastCopiedCgFrame;
+bool _useNativeToolbar = false;
 
 /// Pre-cached window/element rects from background polling.
 /// Updated every ~2 seconds by the native background thread.
@@ -87,12 +89,15 @@ void main() async {
   _windowService = WindowService();
 
   await _windowService.ensureInitialized();
+  final useNativeToolbar = await _windowService.supportsToolbarPanel();
+  _useNativeToolbar = useNativeToolbar;
 
   runApp(
     ASnapApp(
       appState: _appState,
       annotationState: _annotationState,
       windowService: _windowService,
+      useNativeToolbar: useNativeToolbar,
       onCopy: _handleCopy,
       onSave: _handleSave,
       onPin: _handlePin,
@@ -418,6 +423,11 @@ Future<void> _handleDisplayChanged() async {
     return;
   }
 
+  if (_windowService.overlaySelectionActive) {
+    await _handleRegionCancel();
+    return;
+  }
+
   if (_displayChangeInProgress) {
     _displayChangePending = true;
     return;
@@ -506,6 +516,7 @@ Future<void> _handleDisplayChanged() async {
 }
 
 Future<void> _handleRegionSelected(Rect logicalRect) async {
+  _windowService.overlaySelectionActive = false;
   final decodedFullScreen = _appState.decodedFullScreen;
   final screenSize = _appState.screenSize;
   final screenOrigin = _appState.screenOrigin;
@@ -570,6 +581,7 @@ Future<void> _handleRegionSelected(Rect logicalRect) async {
 /// Uses suspendOverlay (not exitOverlay) to avoid a full-screen flash caused by
 /// styleMask restoration while dismissing the overlay.
 Future<void> _handleRegionCopy(Rect logicalRect) async {
+  _windowService.overlaySelectionActive = false;
   final decodedFullScreen = _appState.decodedFullScreen;
   final screenSize = _appState.screenSize;
   final screenOrigin = _appState.screenOrigin;
@@ -639,6 +651,7 @@ Future<void> _handleRegionCopy(Rect logicalRect) async {
 /// the sheet). If the user cancels, returns to selection mode.  If they pick
 /// a path, hides the overlay instantly, then crops + encodes + writes.
 Future<void> _handleRegionSave(Rect logicalRect) async {
+  _windowService.overlaySelectionActive = false;
   // Show save dialog WHILE overlay is visible — selection stays behind the
   // NSSavePanel sheet so the user sees what they're saving.
   final savePath = await _fileService.showSaveDialog();
@@ -698,6 +711,7 @@ Future<void> _handleRegionSave(Rect logicalRect) async {
 }
 
 Future<void> _handleRegionCancel() async {
+  _windowService.overlaySelectionActive = false;
   // Hide window BEFORE clearing state — instant dismiss.
   await _windowService.hidePreview();
   _appState.clear();
@@ -813,6 +827,7 @@ Future<void> _handleDiscard() async {
 /// Crops the selection, composites annotations, encodes to RGBA, and creates
 /// a native floating sticker panel.
 Future<void> _handleRegionPin(Rect logicalRect) async {
+  _windowService.overlaySelectionActive = false;
   final decodedFullScreen = _appState.decodedFullScreen;
   final screenSize = _appState.screenSize;
   final screenOrigin = _appState.screenOrigin;
@@ -1018,19 +1033,26 @@ Future<void> _handleEditPinnedImageAsync(ui.Image pinnedImage) async {
   final panelFrame = await _windowService.getPinnedPanelFrame();
   debugPrint('[aSnap] _handleEditPinnedImage: panelFrame=$panelFrame');
 
-  // Close the native panel — we'll show the Flutter preview in its place.
-  await _windowService.closePinnedImage();
-
   _annotationState.clear();
+  if (_useNativeToolbar) {
+    _windowService.toolbarUpdatesEnabled = false;
+    unawaited(_windowService.hideToolbarPanel());
+  }
 
   // Show the preview at the pin's exact position and size so the image
   // doesn't jump or resize when entering annotation mode.
+  // Keep it transparent until Flutter has rendered to avoid a flash.
   _appState.setCapturedImage(pinnedImage);
+  final Rect? previewRect = panelFrame;
   if (panelFrame != null) {
     // panelFrame is in CG coordinates (absolute). Use showPreviewAtRect
     // which performs full window cleanup (restores opacity from any prior
     // suspendOverlay, resets styleMask, etc.).
-    await _windowService.showPreviewAtRect(rect: panelFrame);
+    await _windowService.showPreviewAtRect(
+      rect: panelFrame,
+      opacity: 0.0,
+      focus: false,
+    );
   } else {
     // Fallback: center on screen if we couldn't get the panel frame.
     final screenInfo = await _windowService.getScreenInfo();
@@ -1041,7 +1063,62 @@ Future<void> _handleEditPinnedImageAsync(ui.Image pinnedImage) async {
       imageHeight: pinnedImage.height,
       screenSize: screenSize,
       screenOrigin: screenOrigin,
+      opacity: 0.0,
+      focus: false,
     );
+  }
+
+  if (_useNativeToolbar) {
+    final Rect windowRect;
+    if (previewRect != null) {
+      windowRect = previewRect;
+    } else {
+      final windowPos = await windowManager.getPosition();
+      final windowSize = await windowManager.getSize();
+      windowRect = Rect.fromLTWH(
+        windowPos.dx,
+        windowPos.dy,
+        windowSize.width,
+        windowSize.height,
+      );
+    }
+    final screenInfo =
+        await _windowService.getScreenInfoForRect(windowRect) ??
+        await _windowService.getScreenInfo();
+    final screenSize = screenInfo?.screenSize ?? const Size(1920, 1080);
+    final screenOrigin = screenInfo?.screenOrigin ?? Offset.zero;
+    final screenRect = Rect.fromLTWH(
+      screenOrigin.dx,
+      screenOrigin.dy,
+      screenSize.width,
+      screenSize.height,
+    );
+    final cgToolbarRect = computeToolbarRectBelowWindow(
+      windowRect: windowRect,
+      screenRect: screenRect,
+    );
+    await _windowService.showToolbarPanel(
+      centerX: cgToolbarRect.center.dx,
+      belowY: cgToolbarRect.top,
+    );
+    await _windowService.updateToolbarState(
+      activeTool: null,
+      canUndo: false,
+      canRedo: false,
+      hasAnnotations: false,
+      showsPin: true,
+    );
+  }
+
+  await WidgetsBinding.instance.endOfFrame;
+
+  // Reveal the preview first, then close the pinned panel so there's no
+  // visible gap between the two windows.
+  await _windowService.revealPreviewWindow();
+  await _windowService.closePinnedImage();
+  if (_useNativeToolbar) {
+    _windowService.toolbarUpdatesEnabled = true;
+    _windowService.onToolbarNeedsUpdate?.call();
   }
   _appState.nudge();
 }

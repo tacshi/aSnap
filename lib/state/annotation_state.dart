@@ -1,6 +1,5 @@
-import 'dart:ui';
-
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 
 import '../models/annotation.dart';
 import '../utils/path_simplify.dart';
@@ -60,6 +59,12 @@ class AnnotationState extends ChangeNotifier {
 
   /// Per-tool settings memory (preserved across tool switches).
   final Map<ShapeType, double> _toolStrokeWidth = {
+    ShapeType.rectangle: 6.0,
+    ShapeType.ellipse: 6.0,
+    ShapeType.arrow: 6.0,
+    ShapeType.line: 6.0,
+    ShapeType.pencil: 6.0,
+    ShapeType.marker: 6.0,
     ShapeType.text: 9.0, // 9 × 4 = 36px default
     ShapeType.mosaic: 8.0, // default block size / blur intensity
     ShapeType.number: 6.0, // 6 × 4 = 24px stamp radius
@@ -278,7 +283,7 @@ class AnnotationState extends ChangeNotifier {
                 (_toolColor[target] ?? defaultSettings.color))
           : (_toolColor[target] ?? defaultSettings.color);
       newSettings = newSettings.copyWith(
-        strokeWidth: _toolStrokeWidth[target] ?? previous.strokeWidth,
+        strokeWidth: _toolStrokeWidth[target] ?? defaultSettings.strokeWidth,
         color: restoredColor,
         mosaicMode: restoredMosaicMode,
       );
@@ -308,6 +313,7 @@ class AnnotationState extends ChangeNotifier {
   void selectAnnotation(int index) {
     if (index < 0 || index >= annotations.length) return;
     _selectedIndex = index;
+    _syncSettingsFromSelection(annotations[index]);
     notifyListeners();
   }
 
@@ -378,6 +384,100 @@ class AnnotationState extends ChangeNotifier {
 
   void _commitAnnotation(Annotation annotation) {
     _commitSnapshot([...annotations, annotation]);
+  }
+
+  void _syncSettingsFromSelection(Annotation annotation) {
+    if (annotation.type != ShapeType.mosaic) return;
+
+    _toolStrokeWidth[ShapeType.mosaic] = annotation.strokeWidth;
+    _toolColor[ShapeType.mosaic] = annotation.color;
+    _toolMosaicMode[ShapeType.mosaic] = annotation.mosaicMode;
+    _mosaicModeColor[annotation.mosaicMode] = annotation.color;
+
+    if (_settings.shapeType == ShapeType.mosaic) {
+      _settings = _settings.copyWith(
+        color: annotation.color,
+        strokeWidth: annotation.strokeWidth,
+        cornerRadius: annotation.cornerRadius,
+        mosaicMode: annotation.mosaicMode,
+      );
+    }
+  }
+
+  bool applySettingsToSelected(DrawingSettings settings) {
+    final idx = _selectedIndex;
+    if (idx == null || idx >= annotations.length) return false;
+    final selected = annotations[idx];
+    if (selected.type != settings.shapeType) return false;
+    final updated = _annotationWithSettings(selected, settings);
+    if (updated == selected) return false;
+    if (_editing) {
+      updateSelected(updated);
+    } else {
+      final list = [...annotations];
+      list[idx] = updated;
+      _history[_historyIndex] = list;
+      notifyListeners();
+    }
+    return true;
+  }
+
+  Annotation _annotationWithSettings(
+    Annotation annotation,
+    DrawingSettings settings,
+  ) {
+    switch (annotation.type) {
+      case ShapeType.rectangle:
+        return annotation.copyWith(
+          color: settings.color,
+          strokeWidth: settings.strokeWidth,
+          cornerRadius: settings.cornerRadius,
+        );
+      case ShapeType.ellipse:
+      case ShapeType.arrow:
+      case ShapeType.line:
+      case ShapeType.pencil:
+      case ShapeType.marker:
+      case ShapeType.number:
+        return annotation.copyWith(
+          color: settings.color,
+          strokeWidth: settings.strokeWidth,
+        );
+      case ShapeType.text:
+        final updated = annotation.copyWith(
+          color: settings.color,
+          strokeWidth: settings.strokeWidth,
+          fontFamily: settings.fontFamily,
+        );
+        final newEnd = _textBoundingEnd(updated, settings);
+        return updated.copyWith(end: newEnd);
+      case ShapeType.mosaic:
+        return annotation.copyWith(
+          color: settings.color,
+          strokeWidth: settings.strokeWidth,
+          cornerRadius: settings.cornerRadius,
+          mosaicMode: settings.mosaicMode,
+        );
+    }
+  }
+
+  Offset _textBoundingEnd(Annotation annotation, DrawingSettings settings) {
+    final text = annotation.text;
+    if (text == null) return annotation.end;
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          fontSize: settings.strokeWidth * 4,
+          fontFamily: settings.fontFamily,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return Offset(
+      annotation.start.dx + textPainter.width,
+      annotation.start.dy + textPainter.height,
+    );
   }
 
   /// Clear all annotations and reset history.

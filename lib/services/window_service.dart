@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -69,6 +70,14 @@ class WindowService {
   /// Called when the user presses Escape on a pinned image panel (close/destroy).
   VoidCallback? onPinnedImageClosed;
 
+  /// Controls whether UI should actively reposition the native toolbar panel.
+  bool toolbarUpdatesEnabled = true;
+  VoidCallback? onToolbarNeedsUpdate;
+
+  /// True when a region selection is active (post-selection) in the overlay.
+  /// Used to decide how to handle multi-display cursor moves.
+  bool overlaySelectionActive = false;
+
   Future<void> ensureInitialized() async {
     await windowManager.ensureInitialized();
 
@@ -132,6 +141,8 @@ class WindowService {
     required int imageHeight,
     required Size screenSize,
     required Offset screenOrigin,
+    double opacity = 1.0,
+    bool focus = true,
   }) async {
     if (imageWidth <= 0 || imageHeight <= 0) return null;
 
@@ -186,14 +197,16 @@ class WindowService {
 
     // Restore opacity right before show — cleanupOverlayState leaves alpha=0
     // to prevent flash during styleMask restoration.
-    await windowManager.setOpacity(1.0);
+    await windowManager.setOpacity(opacity);
     await windowManager.show();
-    await _focusAndActivateWindow();
+    if (focus) {
+      await _focusAndActivateWindow();
 
-    // One more pass right after show to avoid focus races during
-    // overlay -> preview transitions.
-    await Future<void>.delayed(const Duration(milliseconds: 40));
-    await _focusAndActivateWindow();
+      // One more pass right after show to avoid focus races during
+      // overlay -> preview transitions.
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await _focusAndActivateWindow();
+    }
 
     return previewSize;
   }
@@ -252,7 +265,11 @@ class WindowService {
   /// window at the given [rect] in CG coordinates (top-left origin, absolute).
   /// It performs full window cleanup (overlay teardown, opacity restoration)
   /// making it safe to call after [suspendOverlay].
-  Future<void> showPreviewAtRect({required Rect rect}) async {
+  Future<void> showPreviewAtRect({
+    required Rect rect,
+    double opacity = 1.0,
+    bool focus = true,
+  }) async {
     await windowManager.hide();
     await _channel.invokeMethod('cleanupOverlayMode');
 
@@ -273,8 +290,17 @@ class WindowService {
     await windowManager.setHasShadow(true);
     await windowManager.setPosition(Offset(rect.left, rect.top));
 
-    await windowManager.setOpacity(1.0);
+    await windowManager.setOpacity(opacity);
     await windowManager.show();
+    if (focus) {
+      await _focusAndActivateWindow();
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await _focusAndActivateWindow();
+    }
+  }
+
+  Future<void> revealPreviewWindow() async {
+    await windowManager.setOpacity(1.0);
     await _focusAndActivateWindow();
     await Future<void>.delayed(const Duration(milliseconds: 40));
     await _focusAndActivateWindow();
@@ -546,6 +572,12 @@ class WindowService {
   // Native floating toolbar panel
   // ---------------------------------------------------------------------------
 
+  Future<bool> supportsToolbarPanel() async {
+    if (!Platform.isMacOS) return false;
+    final result = await _channel.invokeMethod<bool>('supportsToolbarPanel');
+    return result ?? false;
+  }
+
   /// Show the native toolbar panel centered at [centerX] with its top at
   /// [belowY]. Coordinates are in CG coordinate space (top-left origin).
   Future<void> showToolbarPanel({
@@ -569,12 +601,14 @@ class WindowService {
     required bool canUndo,
     required bool canRedo,
     required bool hasAnnotations,
+    bool showsPin = true,
   }) async {
     await _channel.invokeMethod('updateToolbarState', {
       'activeTool': activeTool,
       'canUndo': canUndo,
       'canRedo': canRedo,
       'hasAnnotations': hasAnnotations,
+      'showsPin': showsPin,
     });
   }
 
@@ -631,6 +665,28 @@ class WindowService {
   /// Lightweight alternative to [captureScreen] when only screen info is needed.
   Future<({Size screenSize, Offset screenOrigin})?> getScreenInfo() async {
     final result = await _channel.invokeMethod<Map>('getScreenInfo');
+    if (result == null) return null;
+    return (
+      screenSize: Size(
+        (result['screenWidth'] as num).toDouble(),
+        (result['screenHeight'] as num).toDouble(),
+      ),
+      screenOrigin: Offset(
+        (result['screenOriginX'] as num).toDouble(),
+        (result['screenOriginY'] as num).toDouble(),
+      ),
+    );
+  }
+
+  Future<({Size screenSize, Offset screenOrigin})?> getScreenInfoForRect(
+    Rect rect,
+  ) async {
+    final result = await _channel.invokeMethod<Map>('getScreenInfoForRect', {
+      'x': rect.left,
+      'y': rect.top,
+      'width': rect.width,
+      'height': rect.height,
+    });
     if (result == null) return null;
     return (
       screenSize: Size(

@@ -11,6 +11,8 @@ import '../models/annotation_hit_test.dart';
 import '../models/selection_handle.dart';
 import '../services/window_service.dart';
 import '../state/annotation_state.dart';
+import '../utils/toolbar_actions.dart';
+import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
 import '../widgets/selection_toolbar.dart';
 import '../widgets/tool_popover_mixin.dart';
@@ -68,6 +70,8 @@ class RegionSelectionScreen extends StatefulWidget {
   /// Annotation state for drawing shapes on the selected region.
   final AnnotationState? annotationState;
   final WindowService windowService;
+  final Offset screenOrigin;
+  final bool useNativeToolbar;
 
   const RegionSelectionScreen({
     super.key,
@@ -75,6 +79,8 @@ class RegionSelectionScreen extends StatefulWidget {
     required this.windowRects,
     required this.onCancel,
     required this.windowService,
+    required this.screenOrigin,
+    required this.useNativeToolbar,
     this.onCopy,
     this.onSave,
     this.onPin,
@@ -91,8 +97,6 @@ class RegionSelectionScreen extends StatefulWidget {
 class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     with ToolPopoverMixin {
   static const _channel = MethodChannel('com.asnap/window');
-  static const _toolbarSize = Size(536, 44);
-  static const _toolbarGap = 8.0;
   final _focusNode = FocusNode();
 
   // -- Interaction state --
@@ -115,6 +119,10 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
 
   // -- Annotation mode --
   final _popoverAnchorLink = LayerLink();
+
+  // -- Native toolbar state --
+  Rect? _lastNativeToolbarCgRect;
+  bool _nativeToolbarVisible = false;
 
   // -- Annotation handle drag state --
   bool _draggingAnnotationHandle = false;
@@ -144,13 +152,22 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     widget.annotationState?.addListener(_handleAnnotationStateChange);
+    if (widget.useNativeToolbar) {
+      widget.windowService.onToolbarAction = _handleNativeToolbarAction;
+    }
   }
 
   @override
   void dispose() {
+    widget.windowService.overlaySelectionActive = false;
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     widget.annotationState?.removeListener(_handleAnnotationStateChange);
-    unawaited(widget.windowService.hideToolbarPanel());
+    if (widget.windowService.onToolbarAction == _handleNativeToolbarAction) {
+      widget.windowService.onToolbarAction = null;
+    }
+    if (widget.useNativeToolbar) {
+      unawaited(widget.windowService.hideToolbarPanel());
+    }
     removePopover();
     _focusNode.dispose();
     super.dispose();
@@ -855,45 +872,90 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   bool get _shouldShowToolbar {
     if (widget.isScrollSelection) return false;
     if (_selectionRect == null) return false;
-    return _phase == _SelectionPhase.selected;
+    return _phase == _SelectionPhase.selected ||
+        _phase == _SelectionPhase.resizing ||
+        _phase == _SelectionPhase.moving;
   }
 
-  /// Compute native toolbar rect relative to the selection rect.
-  /// Priority: below selection → above selection → inside (bottom edge).
   Rect? _toolbarRect(Size screenSize) {
     final sel = _selectionRect;
     if (sel == null) return null;
+    return computeToolbarRect(anchorRect: sel, screenSize: screenSize);
+  }
 
-    var x = sel.center.dx - _toolbarSize.width / 2;
-    double y;
+  void _syncNativeToolbarState() {
+    final state = widget.annotationState;
+    if (!widget.useNativeToolbar || state == null) return;
+    unawaited(
+      widget.windowService.updateToolbarState(
+        activeTool: shapeTypeToToolId(activeShapeType),
+        canUndo: state.canUndo,
+        canRedo: state.canRedo,
+        hasAnnotations: state.hasAnnotations,
+        showsPin: widget.onPin != null,
+      ),
+    );
+  }
 
-    final belowY = sel.bottom + _toolbarGap;
-    final aboveY = sel.top - _toolbarSize.height - _toolbarGap;
-
-    if (belowY + _toolbarSize.height <= screenSize.height) {
-      // Fits below the selection.
-      y = belowY;
-    } else if (aboveY >= 0) {
-      // Fits above the selection.
-      y = aboveY;
-    } else {
-      // Neither above nor below works — place inside the selection,
-      // anchored to the bottom edge with an inset.
-      y = sel.bottom - _toolbarSize.height - _toolbarGap;
-      // Ensure it doesn't go above the selection top.
-      if (y < sel.top + _toolbarGap) {
-        y = sel.top + _toolbarGap;
-      }
+  void _showNativeToolbar(Rect rect) {
+    final cgRect = rect.shift(widget.screenOrigin);
+    if (_nativeToolbarVisible && _lastNativeToolbarCgRect == cgRect) {
+      _syncNativeToolbarState();
+      return;
     }
+    _nativeToolbarVisible = true;
+    _lastNativeToolbarCgRect = cgRect;
+    unawaited(
+      widget.windowService.showToolbarPanel(
+        centerX: cgRect.center.dx,
+        belowY: cgRect.top,
+      ),
+    );
+    _syncNativeToolbarState();
+  }
 
-    // Clamp horizontally.
-    x = x.clamp(0, screenSize.width - _toolbarSize.width);
+  void _hideNativeToolbar() {
+    if (!_nativeToolbarVisible) return;
+    _nativeToolbarVisible = false;
+    _lastNativeToolbarCgRect = null;
+    unawaited(widget.windowService.hideToolbarPanel());
+  }
 
-    return Rect.fromLTWH(x, y, _toolbarSize.width, _toolbarSize.height);
+  void _handleNativeToolbarAction(String action) {
+    if (action.startsWith('toolTap:')) {
+      final toolId = action.substring('toolTap:'.length);
+      final type = toolIdToShapeType(toolId);
+      if (type != null) handleToolTap(type);
+      return;
+    }
+    switch (action) {
+      case 'undo':
+        widget.annotationState?.undo();
+        break;
+      case 'redo':
+        widget.annotationState?.redo();
+        break;
+      case 'copy':
+        _handleToolbarCopy();
+        break;
+      case 'save':
+        _handleToolbarSave();
+        break;
+      case 'pin':
+        _handleToolbarPin();
+        break;
+      case 'discard':
+        _handleToolbarClose();
+        break;
+    }
   }
 
   void _handleAnnotationStateChange() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (widget.useNativeToolbar) {
+      _syncNativeToolbarState();
+    }
+    setState(() {});
   }
 
   // -----------------------------------------------------------------------
@@ -925,6 +987,12 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
 
   @override
   Widget build(BuildContext context) {
+    final selectionActive = !widget.isScrollSelection && _selectionRect != null;
+    if (widget.windowService.overlaySelectionActive != selectionActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.windowService.overlaySelectionActive = selectionActive;
+      });
+    }
     final screenSize = MediaQuery.sizeOf(context);
     final dpr = MediaQuery.devicePixelRatioOf(context);
 
@@ -1063,6 +1131,24 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
                 builder: (context) {
                   final rect = _toolbarRect(screenSize);
                   if (rect == null) return const SizedBox.shrink();
+                  if (widget.useNativeToolbar) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _showNativeToolbar(rect);
+                    });
+                    return Positioned(
+                      left: rect.left,
+                      top: rect.top,
+                      width: rect.width,
+                      height: rect.height,
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: CompositedTransformTarget(
+                          link: _popoverAnchorLink,
+                          child: const SizedBox(width: 1, height: 1),
+                        ),
+                      ),
+                    );
+                  }
                   return Positioned(
                     left: rect.left,
                     top: rect.top,
@@ -1087,6 +1173,15 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
                       ),
                     ),
                   );
+                },
+              )
+            else if (widget.useNativeToolbar)
+              Builder(
+                builder: (context) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _hideNativeToolbar();
+                  });
+                  return const SizedBox.shrink();
                 },
               ),
           ],

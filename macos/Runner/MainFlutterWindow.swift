@@ -71,6 +71,26 @@ class MainFlutterWindow: NSWindow {
     return NSPoint(x: rect.origin.x, y: screenHeight - rect.origin.y - rect.size.height)
   }
 
+  /// Convert an NS-space rect (bottom-left origin) into a CG-space rect
+  /// with a top-left origin in global display coordinates.
+  private func cgTopLeftRect(forNSRect rect: NSRect, on screen: NSScreen?) -> CGRect? {
+    guard let screen = screen ?? NSScreen.main else { return nil }
+    guard let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else {
+      let screenHeight = screen.frame.height
+      return CGRect(
+        x: rect.origin.x,
+        y: screenHeight - rect.origin.y - rect.size.height,
+        width: rect.size.width,
+        height: rect.size.height
+      )
+    }
+    let cgBounds = CGDisplayBounds(displayID)
+    let screenFrame = screen.frame
+    let cgX = cgBounds.origin.x + (rect.origin.x - screenFrame.minX)
+    let cgY = cgBounds.origin.y + (screenFrame.maxY - rect.origin.y - rect.size.height)
+    return CGRect(x: cgX, y: cgY, width: rect.size.width, height: rect.size.height)
+  }
+
   /// Append a debug line to ~/asnap_overlay.log (debug builds only).
   private static func log(_ msg: String) {
     #if DEBUG
@@ -647,6 +667,12 @@ class MainFlutterWindow: NSWindow {
         result(nil)
 
       // MARK: Floating toolbar panel
+      case "supportsToolbarPanel":
+        if #available(macOS 11.0, *) {
+          result(true)
+        } else {
+          result(false)
+        }
       case "showToolbarPanel":
         guard #available(macOS 11.0, *) else { result(nil); return }
         guard let args = call.arguments as? [String: Double],
@@ -664,14 +690,13 @@ class MainFlutterWindow: NSWindow {
           height: panelHeight
         )
         let nsOrigin = self.nsOrigin(forCGTopLeftRect: cgRect)
-        let overlayActive = self.overlayScreenFrame != nil
-        let panelLevel: NSWindow.Level
-        if overlayActive {
-          panelLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)))
-        } else {
-          panelLevel = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
-        }
-        let panelBehavior: NSWindow.CollectionBehavior = overlayActive
+        let maxLevel = Int(CGWindowLevelForKey(.maximumWindow))
+        let baseLevel = Int(self.level.rawValue)
+        let desiredLevel = min(baseLevel + 1, maxLevel)
+        let panelLevel = NSWindow.Level(rawValue: desiredLevel)
+        let useAllSpaces = self.collectionBehavior.contains(.canJoinAllSpaces) ||
+          self.collectionBehavior.contains(.fullScreenAuxiliary)
+        let panelBehavior: NSWindow.CollectionBehavior = useAllSpaces
           ? [.canJoinAllSpaces, .fullScreenAuxiliary]
           : [.moveToActiveSpace]
 
@@ -742,11 +767,13 @@ class MainFlutterWindow: NSWindow {
         let canUndo = args["canUndo"] as? Bool ?? false
         let canRedo = args["canRedo"] as? Bool ?? false
         let hasAnnotations = args["hasAnnotations"] as? Bool ?? false
+        let showsPin = args["showsPin"] as? Bool ?? true
         (self.toolbarContentView as? ToolbarContentView)?.updateState(
           activeTool: activeTool,
           canUndo: canUndo,
           canRedo: canRedo,
-          hasAnnotations: hasAnnotations
+          hasAnnotations: hasAnnotations,
+          showsPin: showsPin
         )
         result(nil)
 
@@ -847,16 +874,17 @@ class MainFlutterWindow: NSWindow {
 
       case "getPinnedPanelFrame":
         guard let panel = self.pinnedPanel else { result(nil); return }
-        // Convert NS frame (bottom-left origin) to CG frame (top-left origin).
+        // Convert NS frame (bottom-left origin) to CG frame (top-left origin)
+        // in global display coordinates.
         let nsFrame = panel.frame
-        let screenHeight = panel.screen?.frame.height ?? NSScreen.main?.frame.height ?? 0
-        let cgX = Double(nsFrame.origin.x)
-        let cgY = Double(screenHeight - nsFrame.origin.y - nsFrame.height)
+        guard let cgRect = self.cgTopLeftRect(forNSRect: nsFrame, on: panel.screen) else {
+          result(nil); return
+        }
         result([
-          "x": cgX,
-          "y": cgY,
-          "width": Double(nsFrame.width),
-          "height": Double(nsFrame.height),
+          "x": Double(cgRect.origin.x),
+          "y": Double(cgRect.origin.y),
+          "width": Double(cgRect.size.width),
+          "height": Double(cgRect.size.height),
         ])
 
       case "getScreenInfo":
@@ -867,6 +895,55 @@ class MainFlutterWindow: NSWindow {
         let target = allScreens.first(where: { $0.frame.contains(mouseLocation) })
           ?? NSScreen.main ?? allScreens.first!
         guard let displayID = (target.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else {
+          result(nil); return
+        }
+        let cgBounds = CGDisplayBounds(displayID)
+        result([
+          "screenWidth": Double(target.frame.size.width),
+          "screenHeight": Double(target.frame.size.height),
+          "screenOriginX": Double(cgBounds.origin.x),
+          "screenOriginY": Double(cgBounds.origin.y),
+        ])
+
+      case "getScreenInfoForRect":
+        guard let args = call.arguments as? [String: Double],
+              let x = args["x"],
+              let y = args["y"],
+              let w = args["width"],
+              let h = args["height"] else {
+          result(nil); return
+        }
+        let cgRect = CGRect(x: x, y: y, width: w, height: h)
+        let allScreens = NSScreen.screens
+        var bestScreen: NSScreen?
+        var bestArea: CGFloat = 0
+
+        for screen in allScreens {
+          guard let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else {
+            continue
+          }
+          let cgBounds = CGDisplayBounds(displayID)
+          let intersection = cgBounds.intersection(cgRect)
+          let area = intersection.isNull ? 0 : intersection.width * intersection.height
+          if area > bestArea {
+            bestArea = area
+            bestScreen = screen
+          }
+        }
+
+        if bestScreen == nil {
+          let center = CGPoint(x: x + w / 2, y: y + h / 2)
+          bestScreen = allScreens.first(where: { screen in
+            guard let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else {
+              return false
+            }
+            let cgBounds = CGDisplayBounds(displayID)
+            return cgBounds.contains(center)
+          }) ?? NSScreen.main ?? allScreens.first
+        }
+
+        guard let target = bestScreen,
+              let displayID = (target.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else {
           result(nil); return
         }
         let cgBounds = CGDisplayBounds(displayID)
@@ -1285,6 +1362,13 @@ class MainFlutterWindow: NSWindow {
   }
 
   private func updateToolbarHitTesting() {
+    if overlayScreenFrame == nil {
+      if overlayIgnoresMouseForToolbar {
+        overlayIgnoresMouseForToolbar = false
+        self.ignoresMouseEvents = false
+      }
+      return
+    }
     guard let panel = toolbarPanel, panel.isVisible else {
       if overlayIgnoresMouseForToolbar {
         overlayIgnoresMouseForToolbar = false
@@ -1528,6 +1612,7 @@ private class ToolbarContentView: NSView {
     static let redoRounded = 0xf00e7
     static let copyRounded = 0xf66c
     static let saveAltRounded = 0xf0125
+    static let pushPinOutlined = 0xf2d7
     static let closeRounded = 0xf647
   }
 
@@ -1549,6 +1634,7 @@ private class ToolbarContentView: NSView {
   private var redoButton: NSButton!
   private var copyButton: NSButton!
   private var saveButton: NSButton!
+  private var pinButton: NSButton!
   private var discardButton: NSButton!
 
   // ── Active-tool highlight layers (one per tool button) ──
@@ -1653,6 +1739,11 @@ private class ToolbarContentView: NSView {
       tooltip: "Save",
       tag: 201
     )
+    pinButton = makeButton(
+      icon: .material(MaterialIcon.pushPinOutlined),
+      tooltip: "Pin",
+      tag: 203
+    )
     discardButton = makeButton(
       icon: .material(MaterialIcon.closeRounded),
       tooltip: "Discard",
@@ -1661,6 +1752,7 @@ private class ToolbarContentView: NSView {
     discardButton.contentTintColor = NSColor(red: 0.94, green: 0.6, blue: 0.6, alpha: 1.0)
     stack.addArrangedSubview(copyButton)
     stack.addArrangedSubview(saveButton)
+    stack.addArrangedSubview(pinButton)
     stack.addArrangedSubview(discardButton)
 
     // ── Highlight layers for tool buttons ──
@@ -1812,6 +1904,7 @@ private class ToolbarContentView: NSView {
       case 101: action = "redo"
       case 200: action = "copy"
       case 201: action = "save"
+      case 203: action = "pin"
       case 202: action = "discard"
       default: return
       }
@@ -1821,7 +1914,13 @@ private class ToolbarContentView: NSView {
 
   // ── State sync ──
 
-  func updateState(activeTool: String?, canUndo: Bool, canRedo: Bool, hasAnnotations: Bool) {
+  func updateState(
+    activeTool: String?,
+    canUndo: Bool,
+    canRedo: Bool,
+    hasAnnotations: Bool,
+    showsPin: Bool
+  ) {
     self.activeTool = activeTool
 
     // Tool highlight
@@ -1837,6 +1936,8 @@ private class ToolbarContentView: NSView {
     undoButton.alphaValue = canUndo ? 1.0 : 0.3
     redoButton.isEnabled = canRedo
     redoButton.alphaValue = canRedo ? 1.0 : 0.3
+
+    pinButton.isHidden = !showsPin
   }
 
   // ── Cursor ──

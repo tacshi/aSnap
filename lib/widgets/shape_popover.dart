@@ -69,7 +69,14 @@ class ShapePopover extends StatelessWidget {
                       _buildColorRow(context, settings),
                       const SizedBox(height: 10),
                     ],
-                    _buildStrokeSlider(settings),
+                    if (settings.shapeType == ShapeType.mosaic &&
+                        settings.mosaicMode == MosaicMode.solidColor) ...[
+                      _buildOpacitySlider(settings),
+                      const SizedBox(height: 10),
+                    ],
+                    if (settings.shapeType != ShapeType.mosaic ||
+                        settings.mosaicMode != MosaicMode.solidColor)
+                      _buildStrokeSlider(settings),
                     if (settings.shapeType == ShapeType.rectangle ||
                         settings.shapeType == ShapeType.mosaic) ...[
                       const SizedBox(height: 10),
@@ -160,11 +167,55 @@ class ShapePopover extends StatelessWidget {
               min: 1,
               max: 20,
               divisions: 19,
+              onChangeStart: (_) => annotationState.beginEdit(),
               onChanged: (value) {
-                annotationState.updateSettings(
-                  settings.copyWith(strokeWidth: value),
+                _applySettings(settings.copyWith(strokeWidth: value));
+              },
+              onChangeEnd: (_) => annotationState.commitEdit(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOpacitySlider(DrawingSettings settings) {
+    final opacity = settings.color.a;
+    final valueLabel = '${(opacity * 100).round()}%';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Opacity',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+            Text(
+              valueLabel,
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
+            ),
+          ],
+        ),
+        SizedBox(
+          height: 24,
+          child: SliderTheme(
+            data: _sliderTheme,
+            child: Slider(
+              value: opacity,
+              min: 0.05,
+              max: 1,
+              divisions: 19,
+              onChangeStart: (_) => annotationState.beginEdit(),
+              onChanged: (value) {
+                _applySettings(
+                  settings.copyWith(
+                    color: settings.color.withValues(alpha: value),
+                  ),
                 );
               },
+              onChangeEnd: (_) => annotationState.commitEdit(),
             ),
           ),
         ),
@@ -198,11 +249,11 @@ class ShapePopover extends StatelessWidget {
               min: 0,
               max: 50,
               divisions: 50,
+              onChangeStart: (_) => annotationState.beginEdit(),
               onChanged: (value) {
-                annotationState.updateSettings(
-                  settings.copyWith(cornerRadius: value),
-                );
+                _applySettings(settings.copyWith(cornerRadius: value));
               },
+              onChangeEnd: (_) => annotationState.commitEdit(),
             ),
           ),
         ),
@@ -237,12 +288,14 @@ class ShapePopover extends StatelessWidget {
                 fontFamily: entry.value,
                 isSelected: settings.fontFamily == entry.value,
                 onTap: () {
-                  annotationState.updateSettings(
+                  annotationState.beginEdit();
+                  _applySettings(
                     settings.copyWith(
                       fontFamily: entry.value,
                       clearFontFamily: entry.value == null,
                     ),
                   );
+                  annotationState.commitEdit();
                 },
               ),
           ],
@@ -276,9 +329,9 @@ class ShapePopover extends StatelessWidget {
                 label: entry.key,
                 isSelected: settings.mosaicMode == entry.value,
                 onTap: () {
-                  annotationState.updateSettings(
-                    settings.copyWith(mosaicMode: entry.value),
-                  );
+                  annotationState.beginEdit();
+                  _applySettings(settings.copyWith(mosaicMode: entry.value));
+                  annotationState.commitEdit();
                 },
               ),
           ],
@@ -288,9 +341,14 @@ class ShapePopover extends StatelessWidget {
   }
 
   void _setColor(Color color) {
-    annotationState.updateSettings(
-      annotationState.settings.copyWith(color: color),
-    );
+    annotationState.beginEdit();
+    _applySettings(annotationState.settings.copyWith(color: color));
+    annotationState.commitEdit();
+  }
+
+  void _applySettings(DrawingSettings settings) {
+    annotationState.updateSettings(settings);
+    annotationState.applySettingsToSelected(annotationState.settings);
   }
 
   static final _sliderTheme = SliderThemeData(
