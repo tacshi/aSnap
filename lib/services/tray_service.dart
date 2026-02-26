@@ -15,7 +15,7 @@ class TrayService with TrayListener {
   VoidCallback? onQuit;
 
   Future<void> init() async {
-    await trayManager.setIcon(kTrayIconPath, isTemplate: true);
+    await trayManager.setIcon(kTrayIconPath, isTemplate: true, iconSize: 18);
     await trayManager.setToolTip(kTrayTooltip);
 
     // Use tray_manager for menu creation and display (proper NSStatusItem
