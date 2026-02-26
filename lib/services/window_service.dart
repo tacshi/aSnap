@@ -620,28 +620,6 @@ class WindowService {
     );
   }
 
-  Future<({Size screenSize, Offset screenOrigin})?> getScreenInfoForRect(
-    Rect rect,
-  ) async {
-    final result = await _channel.invokeMethod<Map>('getScreenInfoForRect', {
-      'x': rect.left,
-      'y': rect.top,
-      'width': rect.width,
-      'height': rect.height,
-    });
-    if (result == null) return null;
-    return (
-      screenSize: Size(
-        (result['screenWidth'] as num).toDouble(),
-        (result['screenHeight'] as num).toDouble(),
-      ),
-      screenOrigin: Offset(
-        (result['screenOriginX'] as num).toDouble(),
-        (result['screenOriginY'] as num).toDouble(),
-      ),
-    );
-  }
-
   Future<void> _focusAndActivateWindow() async {
     await windowManager.focus();
     // Accessory apps can be visible but not active; activate explicitly so

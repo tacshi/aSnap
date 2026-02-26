@@ -786,55 +786,6 @@ class MainFlutterWindow: NSWindow {
           "screenOriginY": Double(cgBounds.origin.y),
         ])
 
-      case "getScreenInfoForRect":
-        guard let args = call.arguments as? [String: Double],
-              let x = args["x"],
-              let y = args["y"],
-              let w = args["width"],
-              let h = args["height"] else {
-          result(nil); return
-        }
-        let cgRect = CGRect(x: x, y: y, width: w, height: h)
-        let allScreens = NSScreen.screens
-        var bestScreen: NSScreen?
-        var bestArea: CGFloat = 0
-
-        for screen in allScreens {
-          guard let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else {
-            continue
-          }
-          let cgBounds = CGDisplayBounds(displayID)
-          let intersection = cgBounds.intersection(cgRect)
-          let area = intersection.isNull ? 0 : intersection.width * intersection.height
-          if area > bestArea {
-            bestArea = area
-            bestScreen = screen
-          }
-        }
-
-        if bestScreen == nil {
-          let center = CGPoint(x: x + w / 2, y: y + h / 2)
-          bestScreen = allScreens.first(where: { screen in
-            guard let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else {
-              return false
-            }
-            let cgBounds = CGDisplayBounds(displayID)
-            return cgBounds.contains(center)
-          }) ?? NSScreen.main ?? allScreens.first
-        }
-
-        guard let target = bestScreen,
-              let displayID = (target.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else {
-          result(nil); return
-        }
-        let cgBounds = CGDisplayBounds(displayID)
-        result([
-          "screenWidth": Double(target.frame.size.width),
-          "screenHeight": Double(target.frame.size.height),
-          "screenOriginX": Double(cgBounds.origin.x),
-          "screenOriginY": Double(cgBounds.origin.y),
-        ])
-
       case "registerTrayShortcuts":
         // Store shortcut mapping; tray_manager handles menu creation and display.
         // We patch keyEquivalent on menu items via didBeginTrackingNotification.
