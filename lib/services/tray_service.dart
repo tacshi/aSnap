@@ -1,13 +1,9 @@
-import 'dart:io';
-
-import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:tray_manager/tray_manager.dart';
 
 import '../utils/constants.dart';
 
 class TrayService with TrayListener {
-  static const _channel = MethodChannel('com.asnap/window');
-
   VoidCallback? onCaptureFullScreen;
   VoidCallback? onCaptureRegion;
   VoidCallback? onCaptureScroll;
@@ -33,31 +29,6 @@ class TrayService with TrayListener {
       ],
     );
     await trayManager.setContextMenu(menu);
-
-    if (Platform.isMacOS) {
-      await _channel.invokeMethod('registerTrayShortcuts', [
-        {
-          'label': 'Region',
-          'keyEquivalent': '1',
-          'modifiers': ['command', 'shift'],
-        },
-        {
-          'label': 'Scroll',
-          'keyEquivalent': '2',
-          'modifiers': ['command', 'shift'],
-        },
-        {
-          'label': 'Full Screen',
-          'keyEquivalent': '3',
-          'modifiers': ['command', 'shift'],
-        },
-        {
-          'label': 'Pin',
-          'keyEquivalent': 'p',
-          'modifiers': ['command', 'shift'],
-        },
-      ]);
-    }
 
     trayManager.addListener(this);
   }

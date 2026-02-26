@@ -604,20 +604,11 @@ class WindowService {
   }
 
   /// Get screen info (logical size + CG origin) for the display under the cursor.
-  /// Lightweight alternative to [captureScreen] when only screen info is needed.
+  /// Uses [captureScreen] metadata to avoid a separate native bridge.
   Future<({Size screenSize, Offset screenOrigin})?> getScreenInfo() async {
-    final result = await _channel.invokeMethod<Map>('getScreenInfo');
-    if (result == null) return null;
-    return (
-      screenSize: Size(
-        (result['screenWidth'] as num).toDouble(),
-        (result['screenHeight'] as num).toDouble(),
-      ),
-      screenOrigin: Offset(
-        (result['screenOriginX'] as num).toDouble(),
-        (result['screenOriginY'] as num).toDouble(),
-      ),
-    );
+    final capture = await captureScreen();
+    if (capture == null) return null;
+    return (screenSize: capture.screenSize, screenOrigin: capture.screenOrigin);
   }
 
   Future<void> _focusAndActivateWindow() async {
