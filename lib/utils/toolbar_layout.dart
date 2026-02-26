@@ -1,7 +1,7 @@
 import 'dart:ui';
 
 /// Must stay in sync with the native toolbar panel size in
-/// MainFlutterWindow.swift (ToolbarContentView).
+/// `SelectionToolbar` (Flutter widget).
 const Size kToolbarSize = Size(536, 44);
 const double kToolbarGap = 8.0;
 

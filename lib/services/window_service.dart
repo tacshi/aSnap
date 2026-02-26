@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -60,19 +59,11 @@ class WindowService {
   /// Rects are in global CG coordinates (top-left origin).
   void Function(List<DetectedWindow> windows)? onRectsUpdated;
 
-  /// Called when a native toolbar button is tapped.
-  /// Action string identifies the button (e.g. "toolTap:rectangle", "copy").
-  void Function(String action)? onToolbarAction;
-
   /// Called when the user presses Space on a pinned image panel (edit request).
   VoidCallback? onEditPinnedImage;
 
   /// Called when the user presses Escape on a pinned image panel (close/destroy).
   VoidCallback? onPinnedImageClosed;
-
-  /// Controls whether UI should actively reposition the native toolbar panel.
-  bool toolbarUpdatesEnabled = true;
-  VoidCallback? onToolbarNeedsUpdate;
 
   /// True when a region selection is active (post-selection) in the overlay.
   /// Used to decide how to handle multi-display cursor moves.
@@ -91,9 +82,6 @@ class WindowService {
         onEscPressed?.call();
       } else if (call.method == 'onScrollCaptureDone') {
         onScrollCaptureDone?.call();
-      } else if (call.method == 'onToolbarAction') {
-        final action = call.arguments as String?;
-        if (action != null) onToolbarAction?.call(action);
       } else if (call.method == 'onEditPinnedImage') {
         onEditPinnedImage?.call();
       } else if (call.method == 'onPinnedImageClosed') {
@@ -134,8 +122,7 @@ class WindowService {
     );
   }
 
-  /// Show the preview window sized to the image. Returns the computed window
-  /// size in logical points (needed to position the native toolbar below it).
+  /// Show the preview window sized to the image.
   Future<Size?> showPreview({
     required int imageWidth,
     required int imageHeight,
@@ -566,50 +553,6 @@ class WindowService {
     await windowManager.hide();
     // Window is already invisible — no need to block on this.
     unawaited(windowManager.setAlwaysOnTop(false));
-  }
-
-  // ---------------------------------------------------------------------------
-  // Native floating toolbar panel
-  // ---------------------------------------------------------------------------
-
-  Future<bool> supportsToolbarPanel() async {
-    if (!Platform.isMacOS) return false;
-    final result = await _channel.invokeMethod<bool>('supportsToolbarPanel');
-    return result ?? false;
-  }
-
-  /// Show the native toolbar panel centered at [centerX] with its top at
-  /// [belowY]. Coordinates are in CG coordinate space (top-left origin).
-  Future<void> showToolbarPanel({
-    required double centerX,
-    required double belowY,
-  }) async {
-    await _channel.invokeMethod('showToolbarPanel', {
-      'centerX': centerX,
-      'belowY': belowY,
-    });
-  }
-
-  /// Hide and destroy the native toolbar panel.
-  Future<void> hideToolbarPanel() async {
-    await _channel.invokeMethod('hideToolbarPanel');
-  }
-
-  /// Update the native toolbar's button states (active tool, undo/redo).
-  Future<void> updateToolbarState({
-    String? activeTool,
-    required bool canUndo,
-    required bool canRedo,
-    required bool hasAnnotations,
-    bool showsPin = true,
-  }) async {
-    await _channel.invokeMethod('updateToolbarState', {
-      'activeTool': activeTool,
-      'canUndo': canUndo,
-      'canRedo': canRedo,
-      'hasAnnotations': hasAnnotations,
-      'showsPin': showsPin,
-    });
   }
 
   // ---------------------------------------------------------------------------

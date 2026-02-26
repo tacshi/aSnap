@@ -13,7 +13,6 @@ import '../services/window_service.dart';
 import '../state/annotation_state.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
-import '../widgets/native_toolbar_mixin.dart';
 import '../widgets/selection_toolbar.dart';
 import '../widgets/tool_popover_mixin.dart';
 
@@ -70,8 +69,6 @@ class RegionSelectionScreen extends StatefulWidget {
   /// Annotation state for drawing shapes on the selected region.
   final AnnotationState? annotationState;
   final WindowService windowService;
-  final Offset screenOrigin;
-  final bool useNativeToolbar;
 
   const RegionSelectionScreen({
     super.key,
@@ -79,8 +76,6 @@ class RegionSelectionScreen extends StatefulWidget {
     required this.windowRects,
     required this.onCancel,
     required this.windowService,
-    required this.screenOrigin,
-    required this.useNativeToolbar,
     this.onCopy,
     this.onSave,
     this.onPin,
@@ -95,7 +90,7 @@ class RegionSelectionScreen extends StatefulWidget {
 }
 
 class _RegionSelectionScreenState extends State<RegionSelectionScreen>
-    with ToolPopoverMixin, NativeToolbarMixin {
+    with ToolPopoverMixin {
   static const _channel = MethodChannel('com.asnap/window');
   final _focusNode = FocusNode();
 
@@ -134,6 +129,9 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   /// channel). Used to reset the cursor when leaving corner handles.
   bool _nativeCursorActive = false;
 
+  /// True while the pointer hovers over the selection toolbar.
+  bool _isHoveringToolbar = false;
+
   /// True while a platform-channel AX hit-test is in flight.
   bool _axQueryInFlight = false;
 
@@ -144,47 +142,10 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   LayerLink get popoverAnchor => _popoverAnchorLink;
 
   @override
-  bool get useNativeToolbar => widget.useNativeToolbar;
-
-  @override
-  WindowService get nativeToolbarWindowService => widget.windowService;
-
-  @override
-  AnnotationState? get nativeToolbarAnnotationState => widget.annotationState;
-
-  @override
-  bool get nativeToolbarShowsPin => widget.onPin != null;
-
-  @override
-  void handleNativeAction(String action) {
-    switch (action) {
-      case 'undo':
-        widget.annotationState?.undo();
-        break;
-      case 'redo':
-        widget.annotationState?.redo();
-        break;
-      case 'copy':
-        _handleToolbarCopy();
-        break;
-      case 'save':
-        _handleToolbarSave();
-        break;
-      case 'pin':
-        _handleToolbarPin();
-        break;
-      case 'discard':
-        _handleToolbarClose();
-        break;
-    }
-  }
-
-  @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     widget.annotationState?.addListener(_handleAnnotationStateChange);
-    initNativeToolbar();
   }
 
   @override
@@ -192,7 +153,6 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     widget.windowService.overlaySelectionActive = false;
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     widget.annotationState?.removeListener(_handleAnnotationStateChange);
-    disposeNativeToolbar();
     removePopover();
     _focusNode.dispose();
     super.dispose();
@@ -811,6 +771,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   // -----------------------------------------------------------------------
 
   MouseCursor get _currentCursor {
+    if (_isHoveringToolbar) return SystemMouseCursors.basic;
     switch (_phase) {
       case _SelectionPhase.hovering:
       case _SelectionPhase.drawing:
@@ -910,9 +871,6 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
 
   void _handleAnnotationStateChange() {
     if (!mounted) return;
-    if (widget.useNativeToolbar) {
-      syncNativeToolbarState();
-    }
     setState(() {});
   }
 
@@ -1070,10 +1028,8 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
               ),
 
             // Transparent Listener — routes ALL pointer events (handles,
-            // annotation drawing, selection). Sits above the overlay so
-            // it always receives events, but returns false from hitTest
-            // (translucent + childless) so the Stack continues testing
-            // children for hover/cursor.
+            // annotation drawing, selection). Uses translucent behaviour so
+            // widgets above (toolbar) still receive hover/tap.
             Positioned.fill(
               child: Listener(
                 onPointerDown: _onPointerDown,
@@ -1084,36 +1040,20 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
               ),
             ),
 
+            // Toolbar sits above the Listener so it receives hover and tap
+            // events directly (enables tooltips, ink effects, click cursor).
             if (_shouldShowToolbar)
               Builder(
                 builder: (context) {
                   final rect = _toolbarRect(screenSize);
                   if (rect == null) return const SizedBox.shrink();
-                  if (widget.useNativeToolbar) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) {
-                        showNativeToolbarBelow(rect, widget.screenOrigin);
-                      }
-                    });
-                    return Positioned(
-                      left: rect.left,
-                      top: rect.top,
-                      width: rect.width,
-                      height: rect.height,
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        child: CompositedTransformTarget(
-                          link: _popoverAnchorLink,
-                          child: const SizedBox(width: 1, height: 1),
-                        ),
-                      ),
-                    );
-                  }
                   return Positioned(
                     left: rect.left,
                     top: rect.top,
                     child: MouseRegion(
                       cursor: SystemMouseCursors.basic,
+                      onEnter: (_) => setState(() => _isHoveringToolbar = true),
+                      onExit: (_) => setState(() => _isHoveringToolbar = false),
                       child: SelectionToolbar(
                         onCopy: _handleToolbarCopy,
                         onSave: _handleToolbarSave,
@@ -1133,15 +1073,6 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
                       ),
                     ),
                   );
-                },
-              )
-            else if (widget.useNativeToolbar)
-              Builder(
-                builder: (context) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) hideNativeToolbar();
-                  });
-                  return const SizedBox.shrink();
                 },
               ),
           ],

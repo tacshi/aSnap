@@ -5,10 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../state/annotation_state.dart';
-import '../services/window_service.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
-import '../widgets/native_toolbar_mixin.dart';
 import '../widgets/selection_toolbar.dart';
 import '../widgets/tool_popover_mixin.dart';
 
@@ -16,30 +14,21 @@ import '../widgets/tool_popover_mixin.dart';
 ///
 /// The stitched image is shown in a centered, scrollable container with a
 /// semi-transparent scrim behind it. The [SelectionToolbar] is positioned
-/// below, above, or inside the image container — the same approach used by
-/// [RegionSelectionScreen] for its toolbar.
+/// below, above, or inside the image container.
 class ScrollResultScreen extends StatefulWidget {
   final ui.Image stitchedImage;
-  final Size screenSize;
-  final Offset screenOrigin;
   final AnnotationState annotationState;
   final VoidCallback onCopy;
   final VoidCallback onSave;
   final VoidCallback onDiscard;
-  final WindowService windowService;
-  final bool useNativeToolbar;
 
   const ScrollResultScreen({
     super.key,
     required this.stitchedImage,
-    required this.screenSize,
-    required this.screenOrigin,
     required this.annotationState,
     required this.onCopy,
     required this.onSave,
     required this.onDiscard,
-    required this.windowService,
-    required this.useNativeToolbar,
   });
 
   @override
@@ -47,7 +36,7 @@ class ScrollResultScreen extends StatefulWidget {
 }
 
 class _ScrollResultScreenState extends State<ScrollResultScreen>
-    with ToolPopoverMixin, NativeToolbarMixin {
+    with ToolPopoverMixin {
   final _focusNode = FocusNode();
   final _scrollController = ScrollController();
 
@@ -60,49 +49,14 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
   LayerLink get popoverAnchor => _popoverAnchorLink;
 
   @override
-  bool get useNativeToolbar => widget.useNativeToolbar;
-
-  @override
-  WindowService get nativeToolbarWindowService => widget.windowService;
-
-  @override
-  AnnotationState get nativeToolbarAnnotationState => widget.annotationState;
-
-  @override
-  bool get nativeToolbarShowsPin => false;
-
-  @override
-  void handleNativeAction(String action) {
-    switch (action) {
-      case 'undo':
-        widget.annotationState.undo();
-        break;
-      case 'redo':
-        widget.annotationState.redo();
-        break;
-      case 'copy':
-        widget.onCopy();
-        break;
-      case 'save':
-        widget.onSave();
-        break;
-      case 'discard':
-        widget.onDiscard();
-        break;
-    }
-  }
-
-  @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    initNativeToolbar();
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
-    disposeNativeToolbar();
     removePopover();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -198,10 +152,6 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
     return Rect.fromLTWH(x, y, w, h);
   }
 
-  // ---------------------------------------------------------------------------
-  // Toolbar positioning (same logic as RegionSelectionScreen._toolbarRect)
-  // ---------------------------------------------------------------------------
-
   Rect _toolbarRect(Rect containerRect, Size screenSize) {
     return computeToolbarRect(
       anchorRect: containerRect,
@@ -218,14 +168,6 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
     final screenSize = MediaQuery.sizeOf(context);
     final containerRect = _imageContainerRect(screenSize);
     final toolbarRect = _toolbarRect(containerRect, screenSize);
-    if (widget.useNativeToolbar) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          showNativeToolbarBelow(toolbarRect, widget.screenOrigin);
-        }
-      });
-      syncNativeToolbarState();
-    }
 
     final image = widget.stitchedImage;
     final imagePixelSize = Size(
@@ -361,41 +303,26 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
               ),
 
               // Toolbar — positioned below/above/inside the image container.
-              if (widget.useNativeToolbar)
-                Positioned(
-                  left: toolbarRect.left,
-                  top: toolbarRect.top,
-                  width: toolbarRect.width,
-                  height: toolbarRect.height,
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: CompositedTransformTarget(
-                      link: _popoverAnchorLink,
-                      child: const SizedBox(width: 1, height: 1),
-                    ),
-                  ),
-                )
-              else
-                Positioned(
-                  left: toolbarRect.left,
-                  top: toolbarRect.top,
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.basic,
-                    child: SelectionToolbar(
-                      onCopy: widget.onCopy,
-                      onSave: widget.onSave,
-                      onClose: widget.onDiscard,
-                      onToolTap: handleToolTap,
-                      onUndo: widget.annotationState.undo,
-                      onRedo: widget.annotationState.redo,
-                      activeShapeType: activeShapeType,
-                      hasAnnotations: widget.annotationState.hasAnnotations,
-                      canUndo: widget.annotationState.canUndo,
-                      canRedo: widget.annotationState.canRedo,
-                      settingsLayerLink: _popoverAnchorLink,
-                    ),
+              Positioned(
+                left: toolbarRect.left,
+                top: toolbarRect.top,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.basic,
+                  child: SelectionToolbar(
+                    onCopy: widget.onCopy,
+                    onSave: widget.onSave,
+                    onClose: widget.onDiscard,
+                    onToolTap: handleToolTap,
+                    onUndo: widget.annotationState.undo,
+                    onRedo: widget.annotationState.redo,
+                    activeShapeType: activeShapeType,
+                    hasAnnotations: widget.annotationState.hasAnnotations,
+                    canUndo: widget.annotationState.canUndo,
+                    canRedo: widget.annotationState.canRedo,
+                    settingsLayerLink: _popoverAnchorLink,
                   ),
                 ),
+              ),
             ],
           );
         },

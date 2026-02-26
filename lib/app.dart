@@ -12,7 +12,6 @@ class ASnapApp extends StatelessWidget {
   final AppState appState;
   final AnnotationState annotationState;
   final WindowService windowService;
-  final bool useNativeToolbar;
   final VoidCallback onCopy;
   final VoidCallback onSave;
   final VoidCallback? onPin;
@@ -34,7 +33,6 @@ class ASnapApp extends StatelessWidget {
     required this.appState,
     required this.annotationState,
     required this.windowService,
-    required this.useNativeToolbar,
     required this.onCopy,
     required this.onSave,
     this.onPin,
@@ -70,7 +68,6 @@ class ASnapApp extends StatelessWidget {
             return RegionSelectionScreen(
               decodedImage: appState.decodedFullScreen!,
               windowRects: appState.windowRects ?? const [],
-              screenOrigin: appState.screenOrigin ?? Offset.zero,
               onCancel: onRegionCancel,
               windowService: windowService,
               onCopy: onRegionCopy,
@@ -78,7 +75,6 @@ class ASnapApp extends StatelessWidget {
               onPin: onRegionPin,
               onHitTest: onHitTest,
               annotationState: annotationState,
-              useNativeToolbar: useNativeToolbar,
             );
           }
           if (appState.status == CaptureStatus.scrollSelecting &&
@@ -86,13 +82,11 @@ class ASnapApp extends StatelessWidget {
             return RegionSelectionScreen(
               decodedImage: appState.decodedFullScreen!,
               windowRects: appState.windowRects ?? const [],
-              screenOrigin: appState.screenOrigin ?? Offset.zero,
               onCancel: onRegionCancel,
               windowService: windowService,
               onRegionSelected: onScrollRegionSelected ?? onRegionSelected,
               onHitTest: onHitTest,
               isScrollSelection: true,
-              useNativeToolbar: useNativeToolbar,
             );
           }
           if (appState.status == CaptureStatus.scrollCapturing) {
@@ -110,14 +104,10 @@ class ASnapApp extends StatelessWidget {
               appState.capturedImage != null) {
             return ScrollResultScreen(
               stitchedImage: appState.capturedImage!,
-              screenSize: appState.screenSize ?? const Size(1920, 1080),
-              screenOrigin: appState.screenOrigin ?? Offset.zero,
               annotationState: annotationState,
               onCopy: onCopy,
               onSave: onSave,
               onDiscard: onDiscard,
-              windowService: windowService,
-              useNativeToolbar: useNativeToolbar,
             );
           }
           return PreviewScreen(
@@ -127,8 +117,6 @@ class ASnapApp extends StatelessWidget {
             onSave: onSave,
             onPin: onPin,
             onDiscard: onDiscard,
-            windowService: windowService,
-            useNativeToolbar: useNativeToolbar,
           );
         },
       ),

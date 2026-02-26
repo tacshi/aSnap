@@ -90,6 +90,9 @@ class _ActionButton extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onPressed,
+          mouseCursor: disabled
+              ? SystemMouseCursors.basic
+              : SystemMouseCursors.click,
           borderRadius: BorderRadius.circular(22),
           hoverColor: disabled
               ? Colors.transparent
