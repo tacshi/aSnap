@@ -361,5 +361,111 @@ void main() {
       expect(applied, isTrue);
       expect(state.annotations.single.strokeWidth, 24.0);
     });
+
+    test('returns false when shape types do not match', () {
+      final state = AnnotationState();
+      // Draw a rectangle.
+      state.startDrawing(const Offset(10, 10));
+      state.updateDrawing(const Offset(100, 100));
+      state.finishDrawing();
+      expect(state.selectedIndex, 0);
+
+      // Try to apply ellipse settings to the selected rectangle.
+      final ellipseSettings = state.settings.copyWith(
+        shapeType: ShapeType.ellipse,
+      );
+      expect(state.applySettingsToSelected(ellipseSettings), isFalse);
+    });
+
+    test('applies corner radius to selected rectangle', () {
+      final state = AnnotationState();
+      state.updateSettings(state.settings.copyWith(cornerRadius: 10));
+      state.startDrawing(const Offset(10, 10));
+      state.updateDrawing(const Offset(100, 100));
+      state.finishDrawing();
+      expect(state.annotations.single.cornerRadius, 10);
+
+      state.updateSettings(state.settings.copyWith(cornerRadius: 30));
+      final applied = state.applySettingsToSelected(state.settings);
+
+      expect(applied, isTrue);
+      expect(state.annotations.single.cornerRadius, 30);
+    });
+
+    test('applies mosaic mode to selected mosaic', () {
+      final state = AnnotationState();
+      state.updateSettings(
+        state.settings.copyWith(shapeType: ShapeType.mosaic),
+      );
+      state.startDrawing(const Offset(10, 10));
+      state.updateDrawing(const Offset(100, 100));
+      state.finishDrawing();
+      expect(state.annotations.single.mosaicMode, MosaicMode.pixelate);
+
+      state.updateSettings(
+        state.settings.copyWith(mosaicMode: MosaicMode.solidColor),
+      );
+      final applied = state.applySettingsToSelected(state.settings);
+
+      expect(applied, isTrue);
+      expect(state.annotations.single.mosaicMode, MosaicMode.solidColor);
+    });
+
+    test('returns false when no annotation is selected', () {
+      final state = AnnotationState();
+      state.startDrawing(const Offset(10, 10));
+      state.updateDrawing(const Offset(100, 100));
+      state.finishDrawing();
+      state.deselectAnnotation();
+
+      expect(state.applySettingsToSelected(state.settings), isFalse);
+    });
+  });
+
+  group('syncSettingsFromSelection', () {
+    test('syncs rectangle color and strokeWidth on selection', () {
+      final state = AnnotationState();
+      state.updateSettings(
+        state.settings.copyWith(
+          color: const Color(0xFF00FF00),
+          strokeWidth: 10,
+        ),
+      );
+      state.startDrawing(const Offset(10, 10));
+      state.updateDrawing(const Offset(100, 100));
+      state.finishDrawing();
+
+      // Change settings away from the drawn annotation's values.
+      state.updateSettings(
+        state.settings.copyWith(color: const Color(0xFFFF0000), strokeWidth: 2),
+      );
+
+      // Select the annotation — settings should sync.
+      state.selectAnnotation(0);
+      expect(state.settings.color, const Color(0xFF00FF00));
+      expect(state.settings.strokeWidth, 10);
+    });
+
+    test('syncs marker with reverse-scaled strokeWidth', () {
+      final state = AnnotationState();
+      // Switch to marker tool first, then set strokeWidth separately
+      // (tool switch restores per-tool defaults, overriding the value).
+      state.updateSettings(
+        state.settings.copyWith(shapeType: ShapeType.marker),
+      );
+      state.updateSettings(state.settings.copyWith(strokeWidth: 5));
+      state.startDrawing(const Offset(10, 10));
+      state.updateDrawing(const Offset(100, 100));
+      state.finishDrawing();
+      // Marker stores 3× the UI value.
+      expect(state.annotations.single.strokeWidth, 15.0);
+
+      // Change settings away.
+      state.updateSettings(state.settings.copyWith(strokeWidth: 2));
+
+      // Select — should restore UI value (15 / 3 = 5).
+      state.selectAnnotation(0);
+      expect(state.settings.strokeWidth, 5);
+    });
   });
 }

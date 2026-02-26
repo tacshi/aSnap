@@ -66,6 +66,11 @@ mixin NativeToolbarMixin<T extends StatefulWidget>
 
   /// Call from [dispose] to unregister the toolbar action callback and hide
   /// the panel.
+  ///
+  /// The identity check ensures we only clear the callback if it still
+  /// belongs to this instance. This is safe as long as only one screen
+  /// using this mixin is active at a time (which the current architecture
+  /// guarantees via state-driven routing).
   void disposeNativeToolbar() {
     if (nativeToolbarWindowService.onToolbarAction ==
         _handleNativeToolbarAction) {

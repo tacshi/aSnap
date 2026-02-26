@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
+import 'models/annotation.dart';
 import 'services/capture_service.dart';
 import 'services/clipboard_service.dart';
 import 'services/file_service.dart';
@@ -914,29 +915,46 @@ Future<void> _handlePin() async {
   final ui.Image sourceImage;
 
   if (fromPreview) {
+    // Detach immediately so a concurrent capture can't dispose the image
+    // while we're compositing / encoding below.
+    _appState.detachCapturedImage();
     sourceImage = image;
   } else if (_lastCopiedImage != null) {
     sourceImage = _lastCopiedImage!;
   } else {
-    debugPrint(
-      '[aSnap] _handlePin: no image to pin (status=${_appState.status})',
-    );
     return;
   }
-  debugPrint(
-    '[aSnap] _handlePin: pinning ${sourceImage.width}x${sourceImage.height} '
-    '(fromPreview=$fromPreview, status=${_appState.status})',
-  );
+
+  // Capture annotations and window position before async work.
+  final annotations = fromPreview
+      ? _annotationState.annotations
+      : const <Annotation>[];
+  final Rect? previewFrame;
+  if (fromPreview) {
+    final windowPos = await windowManager.getPosition();
+    final windowSize = await windowManager.getSize();
+    previewFrame = Rect.fromLTWH(
+      windowPos.dx,
+      windowPos.dy,
+      windowSize.width,
+      windowSize.height,
+    );
+    // Hide Flutter window and return to idle.
+    await _windowService.hidePreview();
+    _appState.clear();
+    _annotationState.clear();
+    _clearDisplayCaches();
+    unawaited(_windowService.stopEscMonitor());
+    unawaited(_windowService.startRectPolling());
+  } else {
+    previewFrame = null;
+  }
 
   // Composite annotations when pinning from preview.
   final ui.Image finalImage;
-  if (fromPreview) {
-    final annotations = _annotationState.annotations;
-    finalImage = annotations.isNotEmpty
-        ? await compositeAnnotations(sourceImage, annotations)
-        : sourceImage;
+  if (fromPreview && annotations.isNotEmpty) {
+    finalImage = await compositeAnnotations(sourceImage, annotations);
   } else {
-    // _lastCopiedImage is already composited.
     finalImage = sourceImage;
   }
 
@@ -945,24 +963,15 @@ Future<void> _handlePin() async {
     format: ui.ImageByteFormat.rawStraightRgba,
   );
   if (byteData == null) {
-    if (fromPreview && !identical(finalImage, sourceImage)) {
-      finalImage.dispose();
-    }
+    if (!identical(finalImage, sourceImage)) finalImage.dispose();
+    sourceImage.dispose();
     return;
   }
 
   // Determine where to place the pin.
   final Rect cgFrame;
   if (fromPreview) {
-    // Use the preview window's current position.
-    final windowPos = await windowManager.getPosition();
-    final windowSize = await windowManager.getSize();
-    cgFrame = Rect.fromLTWH(
-      windowPos.dx,
-      windowPos.dy,
-      windowSize.width,
-      windowSize.height,
-    );
+    cgFrame = previewFrame!;
   } else {
     if (_lastCopiedCgFrame != null) {
       cgFrame = _lastCopiedCgFrame!;
@@ -985,21 +994,8 @@ Future<void> _handlePin() async {
   // Keep a Dart-side reference for fast re-edit via Space.
   _pinnedFlutterImage?.dispose();
   if (fromPreview) {
-    if (identical(finalImage, sourceImage)) {
-      _appState.detachCapturedImage();
-      _pinnedFlutterImage = finalImage;
-    } else {
-      _appState.detachCapturedImage();
-      sourceImage.dispose();
-      _pinnedFlutterImage = finalImage;
-    }
-    // Hide Flutter window and return to idle.
-    await _windowService.hidePreview();
-    _appState.clear();
-    _annotationState.clear();
-    _clearDisplayCaches();
-    unawaited(_windowService.stopEscMonitor());
-    unawaited(_windowService.startRectPolling());
+    if (!identical(finalImage, sourceImage)) sourceImage.dispose();
+    _pinnedFlutterImage = finalImage;
   } else {
     // Pinning from idle (after copy) — transfer _lastCopiedImage ownership.
     _pinnedFlutterImage = _lastCopiedImage;
@@ -1007,14 +1003,12 @@ Future<void> _handlePin() async {
     _lastCopiedCgFrame = null;
   }
 
-  debugPrint('[aSnap] _handlePin: creating native panel at $cgFrame');
   await _windowService.pinImage(
     bytes: byteData.buffer.asUint8List(),
     width: finalImage.width,
     height: finalImage.height,
     cgFrame: cgFrame,
   );
-  debugPrint('[aSnap] _handlePin: done');
 }
 
 void _handleEditPinnedImage() {
@@ -1026,14 +1020,9 @@ void _handleEditPinnedImage() {
 }
 
 Future<void> _handleEditPinnedImageAsync(ui.Image pinnedImage) async {
-  debugPrint(
-    '[aSnap] _handleEditPinnedImage: '
-    '${pinnedImage.width}x${pinnedImage.height}',
-  );
   // Get the pinned panel's CG frame BEFORE closing it so we can show the
   // Flutter preview at exactly the same position and size.
   final panelFrame = await _windowService.getPinnedPanelFrame();
-  debugPrint('[aSnap] _handleEditPinnedImage: panelFrame=$panelFrame');
 
   _annotationState.clear();
   if (_useNativeToolbar) {
@@ -1152,6 +1141,9 @@ Future<void> _handleScrollCapture() async {
     return;
   }
   _escActionInProgress = false;
+  _lastCopiedImage?.dispose();
+  _lastCopiedImage = null;
+  _lastCopiedCgFrame = null;
   await _windowService.stopEscMonitor();
   _annotationState.clear();
   _appState.setCapturing();

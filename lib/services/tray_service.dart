@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:tray_manager/tray_manager.dart';
 
@@ -65,7 +64,6 @@ class TrayService with TrayListener {
 
   @override
   void onTrayMenuItemClick(MenuItem menuItem) {
-    debugPrint('[aSnap] tray click: key=${menuItem.key}');
     switch (menuItem.key) {
       case 'capture_full_screen':
         onCaptureFullScreen?.call();
@@ -74,7 +72,6 @@ class TrayService with TrayListener {
       case 'capture_scroll':
         onCaptureScroll?.call();
       case 'pin':
-        debugPrint('[aSnap] tray: calling onPin (null=${onPin == null})');
         onPin?.call();
       case 'quit':
         onQuit?.call();

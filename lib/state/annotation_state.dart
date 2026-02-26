@@ -387,19 +387,29 @@ class AnnotationState extends ChangeNotifier {
   }
 
   void _syncSettingsFromSelection(Annotation annotation) {
-    if (annotation.type != ShapeType.mosaic) return;
+    final type = annotation.type;
 
-    _toolStrokeWidth[ShapeType.mosaic] = annotation.strokeWidth;
-    _toolColor[ShapeType.mosaic] = annotation.color;
-    _toolMosaicMode[ShapeType.mosaic] = annotation.mosaicMode;
-    _mosaicModeColor[annotation.mosaicMode] = annotation.color;
+    // Marker stores 3× the UI strokeWidth; reverse the scaling so the popover
+    // shows the original slider value.
+    final uiStrokeWidth = type == ShapeType.marker
+        ? annotation.strokeWidth / 3
+        : annotation.strokeWidth;
 
-    if (_settings.shapeType == ShapeType.mosaic) {
+    _toolStrokeWidth[type] = uiStrokeWidth;
+    _toolColor[type] = annotation.color;
+
+    if (type == ShapeType.mosaic) {
+      _toolMosaicMode[ShapeType.mosaic] = annotation.mosaicMode;
+      _mosaicModeColor[annotation.mosaicMode] = annotation.color;
+    }
+
+    // Update live settings if the selected annotation's tool is active.
+    if (_settings.shapeType == type) {
       _settings = _settings.copyWith(
         color: annotation.color,
-        strokeWidth: annotation.strokeWidth,
+        strokeWidth: uiStrokeWidth,
         cornerRadius: annotation.cornerRadius,
-        mosaicMode: annotation.mosaicMode,
+        mosaicMode: type == ShapeType.mosaic ? annotation.mosaicMode : null,
       );
     }
   }
@@ -498,8 +508,15 @@ class AnnotationState extends ChangeNotifier {
     _textEditPosition = null;
     _toolStrokeWidth
       ..clear()
+      ..[ShapeType.rectangle] = 6.0
+      ..[ShapeType.ellipse] = 6.0
+      ..[ShapeType.arrow] = 6.0
+      ..[ShapeType.line] = 6.0
+      ..[ShapeType.pencil] = 6.0
+      ..[ShapeType.marker] = 6.0
       ..[ShapeType.text] = 9.0
-      ..[ShapeType.mosaic] = 8.0;
+      ..[ShapeType.mosaic] = 8.0
+      ..[ShapeType.number] = 6.0;
     _toolColor.clear();
     _toolMosaicMode.clear();
     _mosaicModeColor.clear();
