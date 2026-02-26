@@ -348,7 +348,9 @@ class ShapePopover extends StatelessWidget {
 
   void _applySettings(DrawingSettings settings) {
     annotationState.updateSettings(settings);
-    annotationState.applySettingsToSelected(annotationState.settings);
+    if (annotationState.selectedIndex != null) {
+      annotationState.applySettingsToSelected(annotationState.settings);
+    }
   }
 
   static final _sliderTheme = SliderThemeData(

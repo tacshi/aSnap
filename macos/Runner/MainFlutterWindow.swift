@@ -1742,12 +1742,12 @@ private class ToolbarContentView: NSView {
     pinButton = makeButton(
       icon: .material(MaterialIcon.pushPinOutlined),
       tooltip: "Pin",
-      tag: 203
+      tag: 202
     )
     discardButton = makeButton(
       icon: .material(MaterialIcon.closeRounded),
       tooltip: "Discard",
-      tag: 202
+      tag: 203
     )
     discardButton.contentTintColor = NSColor(red: 0.94, green: 0.6, blue: 0.6, alpha: 1.0)
     stack.addArrangedSubview(copyButton)
@@ -1904,8 +1904,8 @@ private class ToolbarContentView: NSView {
       case 101: action = "redo"
       case 200: action = "copy"
       case 201: action = "save"
-      case 203: action = "pin"
-      case 202: action = "discard"
+      case 202: action = "pin"
+      case 203: action = "discard"
       default: return
       }
     }

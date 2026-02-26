@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -7,9 +6,9 @@ import 'package:flutter/services.dart';
 
 import '../state/annotation_state.dart';
 import '../services/window_service.dart';
-import '../utils/toolbar_actions.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
+import '../widgets/native_toolbar_mixin.dart';
 import '../widgets/selection_toolbar.dart';
 import '../widgets/tool_popover_mixin.dart';
 
@@ -48,15 +47,11 @@ class ScrollResultScreen extends StatefulWidget {
 }
 
 class _ScrollResultScreenState extends State<ScrollResultScreen>
-    with ToolPopoverMixin {
+    with ToolPopoverMixin, NativeToolbarMixin {
   final _focusNode = FocusNode();
   final _scrollController = ScrollController();
 
   final _popoverAnchorLink = LayerLink();
-
-  // -- Native toolbar state --
-  Rect? _lastNativeToolbarCgRect;
-  bool _nativeToolbarVisible = false;
 
   @override
   AnnotationState get popoverAnnotationState => widget.annotationState;
@@ -65,23 +60,49 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
   LayerLink get popoverAnchor => _popoverAnchorLink;
 
   @override
+  bool get useNativeToolbar => widget.useNativeToolbar;
+
+  @override
+  WindowService get nativeToolbarWindowService => widget.windowService;
+
+  @override
+  AnnotationState get nativeToolbarAnnotationState => widget.annotationState;
+
+  @override
+  bool get nativeToolbarShowsPin => false;
+
+  @override
+  void handleNativeAction(String action) {
+    switch (action) {
+      case 'undo':
+        widget.annotationState.undo();
+        break;
+      case 'redo':
+        widget.annotationState.redo();
+        break;
+      case 'copy':
+        widget.onCopy();
+        break;
+      case 'save':
+        widget.onSave();
+        break;
+      case 'discard':
+        widget.onDiscard();
+        break;
+    }
+  }
+
+  @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    if (widget.useNativeToolbar) {
-      widget.windowService.onToolbarAction = _handleNativeToolbarAction;
-    }
+    initNativeToolbar();
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
-    if (widget.windowService.onToolbarAction == _handleNativeToolbarAction) {
-      widget.windowService.onToolbarAction = null;
-    }
-    if (widget.useNativeToolbar) {
-      unawaited(widget.windowService.hideToolbarPanel());
-    }
+    disposeNativeToolbar();
     removePopover();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -188,62 +209,6 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
     );
   }
 
-  void _syncNativeToolbarState() {
-    if (!widget.useNativeToolbar) return;
-    unawaited(
-      widget.windowService.updateToolbarState(
-        activeTool: shapeTypeToToolId(activeShapeType),
-        canUndo: widget.annotationState.canUndo,
-        canRedo: widget.annotationState.canRedo,
-        hasAnnotations: widget.annotationState.hasAnnotations,
-        showsPin: false,
-      ),
-    );
-  }
-
-  void _showNativeToolbar(Rect rect) {
-    final cgRect = rect.shift(widget.screenOrigin);
-    if (_nativeToolbarVisible && _lastNativeToolbarCgRect == cgRect) {
-      _syncNativeToolbarState();
-      return;
-    }
-    _nativeToolbarVisible = true;
-    _lastNativeToolbarCgRect = cgRect;
-    unawaited(
-      widget.windowService.showToolbarPanel(
-        centerX: cgRect.center.dx,
-        belowY: cgRect.top,
-      ),
-    );
-    _syncNativeToolbarState();
-  }
-
-  void _handleNativeToolbarAction(String action) {
-    if (action.startsWith('toolTap:')) {
-      final toolId = action.substring('toolTap:'.length);
-      final type = toolIdToShapeType(toolId);
-      if (type != null) handleToolTap(type);
-      return;
-    }
-    switch (action) {
-      case 'undo':
-        widget.annotationState.undo();
-        break;
-      case 'redo':
-        widget.annotationState.redo();
-        break;
-      case 'copy':
-        widget.onCopy();
-        break;
-      case 'save':
-        widget.onSave();
-        break;
-      case 'discard':
-        widget.onDiscard();
-        break;
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
@@ -255,9 +220,11 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
     final toolbarRect = _toolbarRect(containerRect, screenSize);
     if (widget.useNativeToolbar) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showNativeToolbar(toolbarRect);
+        if (mounted) {
+          showNativeToolbarBelow(toolbarRect, widget.screenOrigin);
+        }
       });
-      _syncNativeToolbarState();
+      syncNativeToolbarState();
     }
 
     final image = widget.stitchedImage;

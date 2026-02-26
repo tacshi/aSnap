@@ -477,10 +477,12 @@ class AnnotationState extends ChangeNotifier {
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    return Offset(
+    final end = Offset(
       annotation.start.dx + textPainter.width,
       annotation.start.dy + textPainter.height,
     );
+    textPainter.dispose();
+    return end;
   }
 
   /// Clear all annotations and reset history.

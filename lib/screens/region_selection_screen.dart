@@ -11,9 +11,9 @@ import '../models/annotation_hit_test.dart';
 import '../models/selection_handle.dart';
 import '../services/window_service.dart';
 import '../state/annotation_state.dart';
-import '../utils/toolbar_actions.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
+import '../widgets/native_toolbar_mixin.dart';
 import '../widgets/selection_toolbar.dart';
 import '../widgets/tool_popover_mixin.dart';
 
@@ -95,7 +95,7 @@ class RegionSelectionScreen extends StatefulWidget {
 }
 
 class _RegionSelectionScreenState extends State<RegionSelectionScreen>
-    with ToolPopoverMixin {
+    with ToolPopoverMixin, NativeToolbarMixin {
   static const _channel = MethodChannel('com.asnap/window');
   final _focusNode = FocusNode();
 
@@ -119,10 +119,6 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
 
   // -- Annotation mode --
   final _popoverAnchorLink = LayerLink();
-
-  // -- Native toolbar state --
-  Rect? _lastNativeToolbarCgRect;
-  bool _nativeToolbarVisible = false;
 
   // -- Annotation handle drag state --
   bool _draggingAnnotationHandle = false;
@@ -148,13 +144,47 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   LayerLink get popoverAnchor => _popoverAnchorLink;
 
   @override
+  bool get useNativeToolbar => widget.useNativeToolbar;
+
+  @override
+  WindowService get nativeToolbarWindowService => widget.windowService;
+
+  @override
+  AnnotationState? get nativeToolbarAnnotationState => widget.annotationState;
+
+  @override
+  bool get nativeToolbarShowsPin => widget.onPin != null;
+
+  @override
+  void handleNativeAction(String action) {
+    switch (action) {
+      case 'undo':
+        widget.annotationState?.undo();
+        break;
+      case 'redo':
+        widget.annotationState?.redo();
+        break;
+      case 'copy':
+        _handleToolbarCopy();
+        break;
+      case 'save':
+        _handleToolbarSave();
+        break;
+      case 'pin':
+        _handleToolbarPin();
+        break;
+      case 'discard':
+        _handleToolbarClose();
+        break;
+    }
+  }
+
+  @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     widget.annotationState?.addListener(_handleAnnotationStateChange);
-    if (widget.useNativeToolbar) {
-      widget.windowService.onToolbarAction = _handleNativeToolbarAction;
-    }
+    initNativeToolbar();
   }
 
   @override
@@ -162,12 +192,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     widget.windowService.overlaySelectionActive = false;
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     widget.annotationState?.removeListener(_handleAnnotationStateChange);
-    if (widget.windowService.onToolbarAction == _handleNativeToolbarAction) {
-      widget.windowService.onToolbarAction = null;
-    }
-    if (widget.useNativeToolbar) {
-      unawaited(widget.windowService.hideToolbarPanel());
-    }
+    disposeNativeToolbar();
     removePopover();
     _focusNode.dispose();
     super.dispose();
@@ -883,77 +908,10 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     return computeToolbarRect(anchorRect: sel, screenSize: screenSize);
   }
 
-  void _syncNativeToolbarState() {
-    final state = widget.annotationState;
-    if (!widget.useNativeToolbar || state == null) return;
-    unawaited(
-      widget.windowService.updateToolbarState(
-        activeTool: shapeTypeToToolId(activeShapeType),
-        canUndo: state.canUndo,
-        canRedo: state.canRedo,
-        hasAnnotations: state.hasAnnotations,
-        showsPin: widget.onPin != null,
-      ),
-    );
-  }
-
-  void _showNativeToolbar(Rect rect) {
-    final cgRect = rect.shift(widget.screenOrigin);
-    if (_nativeToolbarVisible && _lastNativeToolbarCgRect == cgRect) {
-      _syncNativeToolbarState();
-      return;
-    }
-    _nativeToolbarVisible = true;
-    _lastNativeToolbarCgRect = cgRect;
-    unawaited(
-      widget.windowService.showToolbarPanel(
-        centerX: cgRect.center.dx,
-        belowY: cgRect.top,
-      ),
-    );
-    _syncNativeToolbarState();
-  }
-
-  void _hideNativeToolbar() {
-    if (!_nativeToolbarVisible) return;
-    _nativeToolbarVisible = false;
-    _lastNativeToolbarCgRect = null;
-    unawaited(widget.windowService.hideToolbarPanel());
-  }
-
-  void _handleNativeToolbarAction(String action) {
-    if (action.startsWith('toolTap:')) {
-      final toolId = action.substring('toolTap:'.length);
-      final type = toolIdToShapeType(toolId);
-      if (type != null) handleToolTap(type);
-      return;
-    }
-    switch (action) {
-      case 'undo':
-        widget.annotationState?.undo();
-        break;
-      case 'redo':
-        widget.annotationState?.redo();
-        break;
-      case 'copy':
-        _handleToolbarCopy();
-        break;
-      case 'save':
-        _handleToolbarSave();
-        break;
-      case 'pin':
-        _handleToolbarPin();
-        break;
-      case 'discard':
-        _handleToolbarClose();
-        break;
-    }
-  }
-
   void _handleAnnotationStateChange() {
     if (!mounted) return;
     if (widget.useNativeToolbar) {
-      _syncNativeToolbarState();
+      syncNativeToolbarState();
     }
     setState(() {});
   }
@@ -1133,7 +1091,9 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
                   if (rect == null) return const SizedBox.shrink();
                   if (widget.useNativeToolbar) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) _showNativeToolbar(rect);
+                      if (mounted) {
+                        showNativeToolbarBelow(rect, widget.screenOrigin);
+                      }
                     });
                     return Positioned(
                       left: rect.left,
@@ -1179,7 +1139,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
               Builder(
                 builder: (context) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) _hideNativeToolbar();
+                    if (mounted) hideNativeToolbar();
                   });
                   return const SizedBox.shrink();
                 },

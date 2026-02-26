@@ -1,50 +1,30 @@
 import '../models/annotation.dart';
 
-String? shapeTypeToToolId(ShapeType? type) {
-  switch (type) {
-    case ShapeType.rectangle:
-      return 'rectangle';
-    case ShapeType.ellipse:
-      return 'ellipse';
-    case ShapeType.arrow:
-      return 'arrow';
-    case ShapeType.line:
-      return 'line';
-    case ShapeType.pencil:
-      return 'pencil';
-    case ShapeType.marker:
-      return 'marker';
-    case ShapeType.mosaic:
-      return 'mosaic';
-    case ShapeType.number:
-      return 'number';
-    case ShapeType.text:
-      return 'text';
-    case null:
-      return null;
-  }
-}
+const _shapeToTool = <ShapeType, String>{
+  ShapeType.rectangle: 'rectangle',
+  ShapeType.ellipse: 'ellipse',
+  ShapeType.arrow: 'arrow',
+  ShapeType.line: 'line',
+  ShapeType.pencil: 'pencil',
+  ShapeType.marker: 'marker',
+  ShapeType.mosaic: 'mosaic',
+  ShapeType.number: 'number',
+  ShapeType.text: 'text',
+};
 
-ShapeType? toolIdToShapeType(String id) {
-  switch (id) {
-    case 'rectangle':
-      return ShapeType.rectangle;
-    case 'ellipse':
-      return ShapeType.ellipse;
-    case 'arrow':
-      return ShapeType.arrow;
-    case 'line':
-      return ShapeType.line;
-    case 'pencil':
-      return ShapeType.pencil;
-    case 'marker':
-      return ShapeType.marker;
-    case 'mosaic':
-      return ShapeType.mosaic;
-    case 'number':
-      return ShapeType.number;
-    case 'text':
-      return ShapeType.text;
-  }
-  return null;
-}
+const _toolToShape = <String, ShapeType>{
+  'rectangle': ShapeType.rectangle,
+  'ellipse': ShapeType.ellipse,
+  'arrow': ShapeType.arrow,
+  'line': ShapeType.line,
+  'pencil': ShapeType.pencil,
+  'marker': ShapeType.marker,
+  'mosaic': ShapeType.mosaic,
+  'number': ShapeType.number,
+  'text': ShapeType.text,
+};
+
+String? shapeTypeToToolId(ShapeType? type) =>
+    type == null ? null : _shapeToTool[type];
+
+ShapeType? toolIdToShapeType(String id) => _toolToShape[id];
