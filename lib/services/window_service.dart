@@ -616,13 +616,12 @@ class WindowService {
   // Pinned image panel
   // ---------------------------------------------------------------------------
 
-  /// Create a native floating panel displaying the pinned image at the current
-  /// main window position. [bytes] must be raw RGBA pixel data.
   /// Pin an image as a floating native panel.
   ///
-  /// [cgFrame] is an optional CG-coordinate rect (top-left origin) specifying
-  /// the panel's screen position and size. If omitted, the panel appears at the
-  /// current main Flutter window frame.
+  /// [bytes] must be raw RGBA pixel data. [cgFrame] is an optional
+  /// CG-coordinate rect (top-left origin) specifying the panel's screen
+  /// position and size. If omitted, the panel appears at the current main
+  /// Flutter window frame.
   Future<void> pinImage({
     required Uint8List bytes,
     required int width,

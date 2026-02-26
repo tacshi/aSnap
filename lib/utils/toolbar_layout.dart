@@ -51,7 +51,7 @@ Rect computeToolbarRectBelowWindow({
 
   final minY = windowRect.bottom + kToolbarGap;
   final maxY = screenRect.bottom - kToolbarSize.height;
-  final y = minY <= maxY ? minY : maxY;
+  final y = (minY <= maxY ? minY : maxY).clamp(screenRect.top, maxY);
 
   return Rect.fromLTWH(x, y, kToolbarSize.width, kToolbarSize.height);
 }

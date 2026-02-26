@@ -94,5 +94,18 @@ void main() {
       expect(rect.width, kToolbarSize.width);
       expect(rect.height, kToolbarSize.height);
     });
+
+    test('clamps toolbar above screen top on non-origin display', () {
+      // Secondary display at y=1080 with window near the bottom edge.
+      // Window bottom at 2000, gap pushes minY to 2008, which overflows.
+      // maxY = 2160 - 44 = 2116, so toolbar fits — but on a very tall window
+      // that pushes maxY below screenRect.top, the clamp prevents negative.
+      final rect = computeToolbarRectBelowWindow(
+        windowRect: const Rect.fromLTWH(100, 1080, 400, 1080),
+        screenRect: const Rect.fromLTWH(0, 1080, 1920, 1080),
+      );
+
+      expect(rect.top, greaterThanOrEqualTo(1080));
+    });
   });
 }
