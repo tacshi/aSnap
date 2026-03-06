@@ -1022,7 +1022,6 @@ Future<void> _handleEditPinnedImageAsync(ui.Image pinnedImage) async {
   // Get the pinned panel's CG frame BEFORE closing it so we can show the
   // Flutter preview at exactly the same position and size.
   final panelFrame = await _windowService.getPinnedPanelFrame();
-  debugPrint('_handleEditPinnedImageAsync: panelFrame=$panelFrame');
 
   _annotationState.clear();
 
@@ -1037,7 +1036,6 @@ Future<void> _handleEditPinnedImageAsync(ui.Image pinnedImage) async {
     // panelFrame is in CG coordinates (absolute). Use showPreviewAtRect
     // which performs full window cleanup (restores opacity from any prior
     // suspendOverlay, resets styleMask, etc.).
-    debugPrint('_handleEditPinnedImageAsync: calling showPreviewAtRect');
     await _windowService.showPreviewAtRect(
       rect: panelFrame,
       opacity: 0.0,

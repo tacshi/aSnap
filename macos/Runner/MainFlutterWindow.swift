@@ -3,7 +3,7 @@ import Cocoa
 import CoreGraphics
 import FlutterMacOS
 
-class MainFlutterWindow: NSWindow, NSWindowDelegate {
+class MainFlutterWindow: NSWindow {
   private var savedStyleMask: NSWindow.StyleMask?
   private var flutterChannel: FlutterMethodChannel?
   private var spaceChangeObserver: NSObjectProtocol?
@@ -29,7 +29,6 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
   private var toolbarButtons: [String: NSButton] = [:]
   private var pendingToolbarArgs: [String: Any]?
   private var lastToolbarArgs: [String: Any]?
-  private var toolbarRetryScheduled = false
   private var latestToolbarRequestId = 0
   private var toolbarMoveRefreshWorkItem: DispatchWorkItem?
   private var windowDidMoveObserver: NSObjectProtocol?
@@ -903,7 +902,6 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
     }
 
     super.awakeFromNib()
-    self.delegate = self
     self.installWindowFrameObservers()
   }
 
@@ -1374,39 +1372,6 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
     return NSSize(width: ceil(width), height: fallbackHeight)
   }
 
-  private func clampToolbarRectToVisibleScreen(_ rect: NSRect) -> NSRect {
-    let allScreens = NSScreen.screens
-    guard !allScreens.isEmpty else { return rect }
-
-    // Prefer the screen containing the parent preview window.
-    let parentMid = NSPoint(x: self.frame.midX, y: self.frame.midY)
-    let screen =
-      allScreens.first(where: { $0.frame.contains(parentMid) }) ?? self.screen ?? NSScreen.main
-    guard let visible = screen?.visibleFrame else { return rect }
-
-    let margin: CGFloat = 8
-    let minX = visible.minX + margin
-    let maxX = visible.maxX - rect.width - margin
-    let minY = visible.minY + margin
-    let maxY = visible.maxY - rect.height - margin
-
-    let x: CGFloat
-    if maxX >= minX {
-      x = min(max(rect.minX, minX), maxX)
-    } else {
-      x = visible.midX - rect.width / 2
-    }
-
-    let y: CGFloat
-    if maxY >= minY {
-      y = min(max(rect.minY, minY), maxY)
-    } else {
-      y = visible.minY + margin
-    }
-
-    return NSRect(x: x, y: y, width: rect.width, height: rect.height)
-  }
-
   private func clampToolbarRectYToVisibleScreen(_ rect: NSRect) -> NSRect {
     let allScreens = NSScreen.screens
     guard !allScreens.isEmpty else { return rect }
@@ -1430,12 +1395,6 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
     return NSRect(x: rect.minX, y: y, width: rect.width, height: rect.height)
   }
 
-  private func schedulePendingToolbarRetryIfNeeded() {
-    // Disable automatic retry - it can fire during window transitions when
-    // the frame is not yet at its final position. Instead, rely on explicit
-    // processing in revealPreviewWindow and revealOverlay.
-  }
-
   private func showOrUpdateToolbarPanel(_ args: [String: Any]) {
     let requestId =
       (args["requestId"] as? NSNumber)?.intValue ?? (args["requestId"] as? Int) ?? 0
@@ -1450,7 +1409,6 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
     guard self.isVisible, self.alphaValue > 0.99 else {
       self.pendingToolbarArgs = args
       self.hideToolbarPanel(clearPending: false)
-      self.schedulePendingToolbarRetryIfNeeded()
       return
     }
     self.pendingToolbarArgs = nil
@@ -1622,14 +1580,6 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
     }
   }
 
-  func windowDidMove(_ notification: Notification) {
-    scheduleToolbarFollowRefresh()
-  }
-
-  func windowDidResize(_ notification: Notification) {
-    refreshToolbarPanelIfNeeded()
-  }
-
   private func rebuildToolbarPanelContent(
     width: Double,
     height: Double,
@@ -1719,7 +1669,6 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate {
     }
     if clearPending {
       pendingToolbarArgs = nil
-      toolbarRetryScheduled = false
     }
     for button in self.toolbarButtons.values {
       if let toolbarButton = button as? ToolbarButton {
