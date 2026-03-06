@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../models/annotation.dart';
 import '../services/window_service.dart';
 import '../state/annotation_state.dart';
 import '../state/app_state.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
+import '../widgets/native_toolbar_mixin.dart';
 import '../widgets/tool_popover_mixin.dart';
 
 /// Floating preview window for normal (non-scroll) captures.
@@ -41,30 +41,15 @@ class PreviewScreen extends StatefulWidget {
   State<PreviewScreen> createState() => _PreviewScreenState();
 }
 
-class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
+class _PreviewScreenState extends State<PreviewScreen>
+    with ToolPopoverMixin, NativeToolbarMixin {
   final _focusNode = FocusNode();
   bool _focusRetryRunning = false;
-  late final void Function(String) _toolbarActionHandler;
 
   final _popoverAnchorLink = LayerLink();
 
   /// Tracks the last image to detect capture changes and reset annotation UI.
   ui.Image? _lastImage;
-  Rect? _lastToolbarRect;
-  bool _lastShowPin = false;
-  bool _lastShowHistoryControls = false;
-  bool _lastCanUndo = false;
-  bool _lastCanRedo = false;
-  String? _lastActiveTool;
-
-  void _resetToolbarSyncCache() {
-    _lastToolbarRect = null;
-    _lastShowPin = false;
-    _lastShowHistoryControls = false;
-    _lastCanUndo = false;
-    _lastCanRedo = false;
-    _lastActiveTool = null;
-  }
 
   @override
   AnnotationState get popoverAnnotationState => widget.annotationState;
@@ -73,23 +58,27 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
   LayerLink get popoverAnchor => _popoverAnchorLink;
 
   @override
+  WindowService get nativeToolbarWindowService => widget.windowService;
+
+  @override
+  AnnotationState get nativeToolbarAnnotationState => widget.annotationState;
+
+  @override
+  bool get nativeToolbarShowPin => widget.onPin != null;
+
+  @override
+  bool get nativeToolbarAnchorToWindow => true;
+
+  @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    _toolbarActionHandler = _handleNativeToolbarAction;
-    widget.windowService.onToolbarAction = _toolbarActionHandler;
+    initNativeToolbar();
   }
 
   @override
   void dispose() {
-    if (identical(
-      widget.windowService.onToolbarAction,
-      _toolbarActionHandler,
-    )) {
-      widget.windowService.onToolbarAction = null;
-    }
-    _resetToolbarSyncCache();
-    unawaited(widget.windowService.hideToolbarPanel());
+    disposeNativeToolbar();
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     removePopover();
     _focusNode.dispose();
@@ -191,22 +180,8 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
     return false;
   }
 
-  ShapeType? _shapeTypeForAction(String action) {
-    return switch (action) {
-      'rectangle' => ShapeType.rectangle,
-      'ellipse' => ShapeType.ellipse,
-      'arrow' => ShapeType.arrow,
-      'line' => ShapeType.line,
-      'pencil' => ShapeType.pencil,
-      'marker' => ShapeType.marker,
-      'mosaic' => ShapeType.mosaic,
-      'number' => ShapeType.number,
-      'text' => ShapeType.text,
-      _ => null,
-    };
-  }
-
-  void _handleNativeToolbarAction(String action) {
+  @override
+  void handleNativeToolbarAction(String action) {
     switch (action) {
       case 'copy':
         widget.onCopy();
@@ -220,56 +195,9 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
       case 'close':
         widget.onDiscard();
         return;
-      case 'undo':
-        widget.annotationState.undo();
-        return;
-      case 'redo':
-        widget.annotationState.redo();
-        return;
       default:
-        final shape = _shapeTypeForAction(action);
-        if (shape != null) {
-          handleToolTap(shape);
-          return;
-        }
         return;
     }
-  }
-
-  void _syncNativeToolbar(Rect toolbarRect) {
-    final showPin = widget.onPin != null;
-    final showHistoryControls = widget.annotationState.showHistoryControls;
-    final canUndo = widget.annotationState.canUndo;
-    final canRedo = widget.annotationState.canRedo;
-    final activeTool = activeShapeType?.name;
-
-    if (_lastToolbarRect == toolbarRect &&
-        _lastShowPin == showPin &&
-        _lastShowHistoryControls == showHistoryControls &&
-        _lastCanUndo == canUndo &&
-        _lastCanRedo == canRedo &&
-        _lastActiveTool == activeTool) {
-      return;
-    }
-
-    _lastToolbarRect = toolbarRect;
-    _lastShowPin = showPin;
-    _lastShowHistoryControls = showHistoryControls;
-    _lastCanUndo = canUndo;
-    _lastCanRedo = canRedo;
-    _lastActiveTool = activeTool;
-
-    unawaited(
-      widget.windowService.showToolbarPanel(
-        rect: toolbarRect,
-        showPin: showPin,
-        showHistoryControls: showHistoryControls,
-        canUndo: canUndo,
-        canRedo: canRedo,
-        activeTool: activeTool,
-        anchorToWindow: true,
-      ),
-    );
   }
 
   // ---------------------------------------------------------------------------
@@ -284,7 +212,7 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
         final image = widget.appState.capturedImage;
         if (image == null) {
           _lastImage = null;
-          _resetToolbarSyncCache();
+          hideNativeToolbar();
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
             unawaited(widget.windowService.hideToolbarPanel());
@@ -298,7 +226,7 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
             removePopover();
             activeShapeType = null;
           }
-          _resetToolbarSyncCache();
+          resetNativeToolbarSyncCache();
         }
         _lastImage = image;
 
@@ -315,7 +243,7 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
               );
               final toolbarSize = computeNativeToolbarSize(
                 showPin: widget.onPin != null,
-                showHistoryControls: widget.annotationState.showHistoryControls,
+                showHistoryControls: true,
               );
               final imageViewport = constraints.biggest;
               final fitted = applyBoxFit(
@@ -343,7 +271,7 @@ class _PreviewScreenState extends State<PreviewScreen> with ToolPopoverMixin {
                   .toDouble();
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted) return;
-                _syncNativeToolbar(toolbarRect);
+                syncNativeToolbar(toolbarRect);
               });
 
               return Stack(

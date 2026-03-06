@@ -14,6 +14,7 @@ import '../services/window_service.dart';
 import '../state/annotation_state.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
+import '../widgets/native_toolbar_mixin.dart';
 import '../widgets/tool_popover_mixin.dart';
 
 /// Internal phase of the selection interaction.
@@ -90,10 +91,9 @@ class RegionSelectionScreen extends StatefulWidget {
 }
 
 class _RegionSelectionScreenState extends State<RegionSelectionScreen>
-    with ToolPopoverMixin {
+    with ToolPopoverMixin, NativeToolbarMixin {
   final _focusNode = FocusNode();
   bool _focusRetryRunning = false;
-  late final void Function(String) _toolbarActionHandler;
 
   // -- Interaction state --
   _SelectionPhase _phase = _SelectionPhase.hovering;
@@ -129,13 +129,6 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   /// True while a platform-channel AX hit-test is in flight.
   bool _axQueryInFlight = false;
 
-  Rect? _lastToolbarRect;
-  bool _lastShowPin = false;
-  bool _lastShowHistoryControls = false;
-  bool _lastCanUndo = false;
-  bool _lastCanRedo = false;
-  String? _lastActiveTool;
-
   @override
   AnnotationState? get popoverAnnotationState => widget.annotationState;
 
@@ -143,23 +136,25 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   LayerLink get popoverAnchor => _popoverAnchorLink;
 
   @override
+  WindowService get nativeToolbarWindowService => widget.windowService;
+
+  @override
+  AnnotationState? get nativeToolbarAnnotationState => widget.annotationState;
+
+  @override
+  bool get nativeToolbarShowPin => widget.onPin != null;
+
+  @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     widget.annotationState?.addListener(_handleAnnotationStateChange);
-    _toolbarActionHandler = _handleNativeToolbarAction;
-    widget.windowService.onToolbarAction = _toolbarActionHandler;
+    initNativeToolbar();
   }
 
   @override
   void dispose() {
-    if (identical(
-      widget.windowService.onToolbarAction,
-      _toolbarActionHandler,
-    )) {
-      widget.windowService.onToolbarAction = null;
-    }
-    unawaited(widget.windowService.hideToolbarPanel());
+    disposeNativeToolbar();
     widget.windowService.overlaySelectionActive = false;
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     widget.annotationState?.removeListener(_handleAnnotationStateChange);
@@ -868,30 +863,14 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   }
 
   Size _nativeToolbarSize() {
-    final showHistoryControls =
-        widget.annotationState?.showHistoryControls ?? false;
     return computeNativeToolbarSize(
       showPin: widget.onPin != null,
-      showHistoryControls: showHistoryControls,
+      showHistoryControls: true,
     );
   }
 
-  ShapeType? _shapeTypeForAction(String action) {
-    return switch (action) {
-      'rectangle' => ShapeType.rectangle,
-      'ellipse' => ShapeType.ellipse,
-      'arrow' => ShapeType.arrow,
-      'line' => ShapeType.line,
-      'pencil' => ShapeType.pencil,
-      'marker' => ShapeType.marker,
-      'mosaic' => ShapeType.mosaic,
-      'number' => ShapeType.number,
-      'text' => ShapeType.text,
-      _ => null,
-    };
-  }
-
-  void _handleNativeToolbarAction(String action) {
+  @override
+  void handleNativeToolbarAction(String action) {
     switch (action) {
       case 'copy':
         _handleToolbarCopy();
@@ -905,73 +884,9 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
       case 'close':
         _handleToolbarClose();
         return;
-      case 'undo':
-        widget.annotationState?.undo();
-        return;
-      case 'redo':
-        widget.annotationState?.redo();
-        return;
       default:
-        final shape = _shapeTypeForAction(action);
-        if (shape != null && widget.annotationState != null) {
-          handleToolTap(shape);
-        }
         return;
     }
-  }
-
-  void _hideNativeToolbar() {
-    if (_lastToolbarRect == null &&
-        !_lastShowPin &&
-        !_lastShowHistoryControls &&
-        !_lastCanUndo &&
-        !_lastCanRedo &&
-        _lastActiveTool == null) {
-      return;
-    }
-    _lastToolbarRect = null;
-    _lastShowPin = false;
-    _lastShowHistoryControls = false;
-    _lastCanUndo = false;
-    _lastCanRedo = false;
-    _lastActiveTool = null;
-    unawaited(widget.windowService.hideToolbarPanel());
-  }
-
-  void _syncNativeToolbar(Rect toolbarRect) {
-    final showPin = widget.onPin != null;
-    final showHistoryControls =
-        widget.annotationState?.showHistoryControls ?? false;
-    final canUndo = widget.annotationState?.canUndo ?? false;
-    final canRedo = widget.annotationState?.canRedo ?? false;
-    final activeTool = activeShapeType?.name;
-
-    if (_lastToolbarRect == toolbarRect &&
-        _lastShowPin == showPin &&
-        _lastShowHistoryControls == showHistoryControls &&
-        _lastCanUndo == canUndo &&
-        _lastCanRedo == canRedo &&
-        _lastActiveTool == activeTool) {
-      return;
-    }
-
-    _lastToolbarRect = toolbarRect;
-    _lastShowPin = showPin;
-    _lastShowHistoryControls = showHistoryControls;
-    _lastCanUndo = canUndo;
-    _lastCanRedo = canRedo;
-    _lastActiveTool = activeTool;
-
-    unawaited(
-      widget.windowService.showToolbarPanel(
-        rect: toolbarRect,
-        showPin: showPin,
-        showHistoryControls: showHistoryControls,
-        canUndo: canUndo,
-        canRedo: canRedo,
-        activeTool: activeTool,
-      ),
-    );
   }
 
   void _handleAnnotationStateChange() {
@@ -1024,9 +939,9 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (showToolbar) {
-        _syncNativeToolbar(toolbarRect);
+        syncNativeToolbar(toolbarRect);
       } else {
-        _hideNativeToolbar();
+        hideNativeToolbar();
       }
     });
 

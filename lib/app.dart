@@ -117,7 +117,6 @@ class ASnapApp extends StatelessWidget {
                 windowService: windowService,
                 onCopy: onCopy,
                 onSave: onSave,
-                onPin: onPin,
                 onDiscard: onDiscard,
               );
             default:

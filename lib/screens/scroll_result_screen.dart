@@ -1,15 +1,14 @@
-import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/annotation.dart';
 import '../services/window_service.dart';
 import '../state/annotation_state.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
+import '../widgets/native_toolbar_mixin.dart';
 import '../widgets/tool_popover_mixin.dart';
 
 /// Fullscreen overlay that displays a scroll capture result.
@@ -23,7 +22,6 @@ class ScrollResultScreen extends StatefulWidget {
   final WindowService windowService;
   final VoidCallback onCopy;
   final VoidCallback onSave;
-  final VoidCallback? onPin;
   final VoidCallback onDiscard;
 
   const ScrollResultScreen({
@@ -33,7 +31,6 @@ class ScrollResultScreen extends StatefulWidget {
     required this.windowService,
     required this.onCopy,
     required this.onSave,
-    this.onPin,
     required this.onDiscard,
   });
 
@@ -42,27 +39,11 @@ class ScrollResultScreen extends StatefulWidget {
 }
 
 class _ScrollResultScreenState extends State<ScrollResultScreen>
-    with ToolPopoverMixin {
+    with ToolPopoverMixin, NativeToolbarMixin {
   final _focusNode = FocusNode();
   final _scrollController = ScrollController();
-  late final void Function(String) _toolbarActionHandler;
 
   final _popoverAnchorLink = LayerLink();
-  Rect? _lastToolbarRect;
-  bool _lastShowPin = false;
-  bool _lastShowHistoryControls = false;
-  bool _lastCanUndo = false;
-  bool _lastCanRedo = false;
-  String? _lastActiveTool;
-
-  void _resetToolbarSyncCache() {
-    _lastToolbarRect = null;
-    _lastShowPin = false;
-    _lastShowHistoryControls = false;
-    _lastCanUndo = false;
-    _lastCanRedo = false;
-    _lastActiveTool = null;
-  }
 
   @override
   AnnotationState get popoverAnnotationState => widget.annotationState;
@@ -71,23 +52,24 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
   LayerLink get popoverAnchor => _popoverAnchorLink;
 
   @override
+  WindowService get nativeToolbarWindowService => widget.windowService;
+
+  @override
+  AnnotationState get nativeToolbarAnnotationState => widget.annotationState;
+
+  @override
+  bool get nativeToolbarShowPin => false;
+
+  @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    _toolbarActionHandler = _handleNativeToolbarAction;
-    widget.windowService.onToolbarAction = _toolbarActionHandler;
+    initNativeToolbar();
   }
 
   @override
   void dispose() {
-    if (identical(
-      widget.windowService.onToolbarAction,
-      _toolbarActionHandler,
-    )) {
-      widget.windowService.onToolbarAction = null;
-    }
-    _resetToolbarSyncCache();
-    unawaited(widget.windowService.hideToolbarPanel());
+    disposeNativeToolbar();
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     removePopover();
     _scrollController.dispose();
@@ -127,11 +109,6 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
       widget.annotationState.undo();
       return true;
     }
-    if (meta && shift && event.logicalKey == LogicalKeyboardKey.keyP) {
-      widget.onPin?.call();
-      return true;
-    }
-
     // Delete/Backspace → delete selected annotation.
     if (event.logicalKey == LogicalKeyboardKey.delete ||
         event.logicalKey == LogicalKeyboardKey.backspace) {
@@ -161,22 +138,8 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
     return false;
   }
 
-  ShapeType? _shapeTypeForAction(String action) {
-    return switch (action) {
-      'rectangle' => ShapeType.rectangle,
-      'ellipse' => ShapeType.ellipse,
-      'arrow' => ShapeType.arrow,
-      'line' => ShapeType.line,
-      'pencil' => ShapeType.pencil,
-      'marker' => ShapeType.marker,
-      'mosaic' => ShapeType.mosaic,
-      'number' => ShapeType.number,
-      'text' => ShapeType.text,
-      _ => null,
-    };
-  }
-
-  void _handleNativeToolbarAction(String action) {
+  @override
+  void handleNativeToolbarAction(String action) {
     switch (action) {
       case 'copy':
         widget.onCopy();
@@ -184,61 +147,12 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
       case 'save':
         widget.onSave();
         return;
-      case 'pin':
-        widget.onPin?.call();
-        return;
       case 'close':
         widget.onDiscard();
         return;
-      case 'undo':
-        widget.annotationState.undo();
-        return;
-      case 'redo':
-        widget.annotationState.redo();
-        return;
       default:
-        final shape = _shapeTypeForAction(action);
-        if (shape != null) {
-          handleToolTap(shape);
-          return;
-        }
         return;
     }
-  }
-
-  void _syncNativeToolbar(Rect toolbarRect) {
-    final showPin = widget.onPin != null;
-    final showHistoryControls = widget.annotationState.showHistoryControls;
-    final canUndo = widget.annotationState.canUndo;
-    final canRedo = widget.annotationState.canRedo;
-    final activeTool = activeShapeType?.name;
-
-    if (_lastToolbarRect == toolbarRect &&
-        _lastShowPin == showPin &&
-        _lastShowHistoryControls == showHistoryControls &&
-        _lastCanUndo == canUndo &&
-        _lastCanRedo == canRedo &&
-        _lastActiveTool == activeTool) {
-      return;
-    }
-
-    _lastToolbarRect = toolbarRect;
-    _lastShowPin = showPin;
-    _lastShowHistoryControls = showHistoryControls;
-    _lastCanUndo = canUndo;
-    _lastCanRedo = canRedo;
-    _lastActiveTool = activeTool;
-
-    unawaited(
-      widget.windowService.showToolbarPanel(
-        rect: toolbarRect,
-        showPin: showPin,
-        showHistoryControls: showHistoryControls,
-        canUndo: canUndo,
-        canRedo: canRedo,
-        activeTool: activeTool,
-      ),
-    );
   }
 
   // ---------------------------------------------------------------------------
@@ -303,8 +217,8 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
         builder: (context, _) {
           final screenSize = MediaQuery.sizeOf(context);
           final toolbarSize = computeNativeToolbarSize(
-            showPin: widget.onPin != null,
-            showHistoryControls: widget.annotationState.showHistoryControls,
+            showPin: false,
+            showHistoryControls: true,
           );
           final containerRect = _imageContainerRect(
             screenSize,
@@ -325,7 +239,7 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
 
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
-            _syncNativeToolbar(toolbarRect);
+            syncNativeToolbar(toolbarRect);
           });
 
           return Stack(

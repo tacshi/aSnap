@@ -1366,8 +1366,13 @@ class MainFlutterWindow: NSWindow {
     button.focusRingType = .none
     button.toolTip = toolTip
     if #available(macOS 11.0, *) {
-      button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: toolTip)
-      button.imageScaling = .scaleProportionallyDown
+      if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: toolTip) {
+        button.image = image
+        button.imageScaling = .scaleProportionallyDown
+      } else {
+        button.title = String(toolTip.prefix(1))
+        button.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+      }
     } else {
       button.title = String(toolTip.prefix(1))
       button.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -1428,43 +1433,7 @@ class MainFlutterWindow: NSWindow {
     return NSRect(x: macX, y: macY, width: width, height: height)
   }
 
-  private func toolbarPanelSize(
-    showPin: Bool,
-    showHistoryControls: Bool,
-    fallbackHeight: CGFloat
-  )
-    -> NSSize
-  {
-    let buttonWidth: CGFloat = 22
-    let separatorWidth: CGFloat = 1
-    let spacing: CGFloat = 4
-    let horizontalPadding: CGFloat = 16  // root leading/trailing = 8 + 8
-
-    // 9 drawing tools are always visible.
-    var viewCount = 9
-    var widthSum = CGFloat(9) * buttonWidth
-
-    if showHistoryControls {
-      // undo + redo + separator before them
-      viewCount += 3
-      widthSum += (2 * buttonWidth) + separatorWidth
-    }
-
-    // Separator before action buttons.
-    viewCount += 1
-    widthSum += separatorWidth
-
-    // Copy + Save + (optional Pin) + Close.
-    let actionCount = showPin ? 4 : 3
-    viewCount += actionCount
-    widthSum += CGFloat(actionCount) * buttonWidth
-
-    let gaps = max(viewCount - 1, 0)
-    let width = horizontalPadding + widthSum + CGFloat(gaps) * spacing
-    return NSSize(width: ceil(width), height: fallbackHeight)
-  }
-
-  private func clampToolbarRectYToVisibleScreen(_ rect: NSRect) -> NSRect {
+  private func clampToolbarRectToVisibleScreen(_ rect: NSRect) -> NSRect {
     let allScreens = NSScreen.screens
     guard !allScreens.isEmpty else { return rect }
 
@@ -1474,8 +1443,17 @@ class MainFlutterWindow: NSWindow {
     guard let visible = screen?.visibleFrame else { return rect }
 
     let margin: CGFloat = 8
+    let minX = visible.minX + margin
+    let maxX = visible.maxX - rect.width - margin
     let minY = visible.minY + margin
     let maxY = visible.maxY - rect.height - margin
+
+    let x: CGFloat
+    if maxX >= minX {
+      x = min(max(rect.minX, minX), maxX)
+    } else {
+      x = visible.midX - rect.width / 2
+    }
 
     let y: CGFloat
     if maxY >= minY {
@@ -1484,7 +1462,7 @@ class MainFlutterWindow: NSWindow {
       y = visible.minY + margin
     }
 
-    return NSRect(x: rect.minX, y: y, width: rect.width, height: rect.height)
+    return NSRect(x: x, y: y, width: rect.width, height: rect.height)
   }
 
   private func showOrUpdateToolbarPanel(_ args: [String: Any]) {
@@ -1543,10 +1521,13 @@ class MainFlutterWindow: NSWindow {
 
     self.lastToolbarArgs = args
 
-    let targetSize = toolbarPanelSize(
+    let (contentView, targetSize) = makeToolbarPanelContent(
+      fallbackHeight: CGFloat(height),
       showPin: showPin,
       showHistoryControls: showHistoryControls,
-      fallbackHeight: CGFloat(height)
+      canUndo: canUndo,
+      canRedo: canRedo,
+      activeTool: activeTool
     )
 
     var screenRect: NSRect
@@ -1565,19 +1546,22 @@ class MainFlutterWindow: NSWindow {
         height: targetSize.height
       )
       MainFlutterWindow.log("anchorToWindow: computed screenRect=\(screenRect)")
-      // Only clamp vertically to keep the toolbar visible.
-      screenRect = clampToolbarRectYToVisibleScreen(screenRect)
+      // Keep the toolbar inside the visible screen bounds.
+      screenRect = clampToolbarRectToVisibleScreen(screenRect)
       MainFlutterWindow.log("anchorToWindow: after clamp screenRect=\(screenRect)")
     } else {
-      screenRect = localTopLeftRectToScreenRect(x: x, y: y, width: width, height: height)
-      // Keep panel centered around the requested X center while shrinking width
-      // to actual content, and preserve top edge.
-      screenRect.origin.x += (screenRect.width - targetSize.width) / 2
-      screenRect.origin.y += (screenRect.height - targetSize.height)
-      screenRect.size = targetSize
-      // Preserve horizontal alignment with selection center.
-      // Only clamp vertically to keep the toolbar visible.
-      screenRect = clampToolbarRectYToVisibleScreen(screenRect)
+      let requestedRect = localTopLeftRectToScreenRect(x: x, y: y, width: width, height: height)
+      let requestedCenterX = requestedRect.midX
+      let requestedTopY = requestedRect.maxY
+      screenRect = NSRect(
+        x: requestedCenterX - targetSize.width / 2,
+        y: requestedTopY - targetSize.height,
+        width: targetSize.width,
+        height: targetSize.height
+      )
+      // Preserve horizontal alignment with selection center as much as
+      // possible while keeping the toolbar on-screen.
+      screenRect = clampToolbarRectToVisibleScreen(screenRect)
       MainFlutterWindow.log("NON-anchorToWindow: x=\(x), y=\(y), screenRect=\(screenRect)")
     }
 
@@ -1613,15 +1597,8 @@ class MainFlutterWindow: NSWindow {
     // Keep toolbar above the active main window level.
     panel.level = NSWindow.Level(rawValue: self.level.rawValue + 1)
     MainFlutterWindow.log("setFrame toolbar panel done, panel.frame after: \(panel.frame)")
-    self.rebuildToolbarPanelContent(
-      width: Double(targetSize.width),
-      height: Double(targetSize.height),
-      showPin: showPin,
-      showHistoryControls: showHistoryControls,
-      canUndo: canUndo,
-      canRedo: canRedo,
-      activeTool: activeTool
-    )
+    contentView.frame = NSRect(x: 0, y: 0, width: targetSize.width, height: targetSize.height)
+    panel.contentView = contentView
 
     // Keep the toolbar as an independent floating panel.
     // Child-window attachment can apply AppKit-relative positioning rules
@@ -1680,36 +1657,29 @@ class MainFlutterWindow: NSWindow {
     }
   }
 
-  private func rebuildToolbarPanelContent(
-    width: Double,
-    height: Double,
+  private func makeToolbarPanelContent(
+    fallbackHeight: CGFloat,
     showPin: Bool,
     showHistoryControls: Bool,
     canUndo: Bool,
     canRedo: Bool,
     activeTool: String?
-  ) {
-    guard let panel = self.toolbarPanel else { return }
+  ) -> (ToolbarRootView, NSSize) {
+    for button in self.toolbarButtons.values {
+      if let toolbarButton = button as? ToolbarButton {
+        toolbarButton.hideTooltipIfVisible()
+      }
+    }
     self.toolbarButtons.removeAll()
-
-    let root = ToolbarRootView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-    root.wantsLayer = true
-    root.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 0.88).cgColor
-    root.layer?.cornerRadius = height / 2
-    root.layer?.masksToBounds = true
 
     let stack = NSStackView()
     stack.orientation = .horizontal
     stack.alignment = .centerY
+    stack.distribution = .fill
     stack.spacing = 4
     stack.translatesAutoresizingMaskIntoConstraints = false
-    root.addSubview(stack)
-    NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
-      stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-      stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
-      stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
-    ])
+    stack.setContentHuggingPriority(.required, for: .horizontal)
+    stack.setContentCompressionResistancePriority(.required, for: .horizontal)
 
     func addButton(
       id: String,
@@ -1756,11 +1726,30 @@ class MainFlutterWindow: NSWindow {
     addButton(id: "copy", symbol: "doc.on.doc", tip: "Copy")
     addButton(id: "save", symbol: "square.and.arrow.down", tip: "Save")
     if showPin {
-      addButton(id: "pin", symbol: "pin", tip: "Pin")
+      addButton(id: "pin", symbol: "pin.fill", tip: "Pin")
     }
     addButton(id: "close", symbol: "xmark", tip: "Close", destructive: true)
 
-    panel.contentView = root
+    let fittedWidth = ceil(stack.fittingSize.width + 16)
+    let targetSize = NSSize(width: fittedWidth, height: fallbackHeight)
+    let root = ToolbarRootView(
+      frame: NSRect(x: 0, y: 0, width: targetSize.width, height: targetSize.height)
+    )
+    root.wantsLayer = true
+    root.layer?.backgroundColor = NSColor(calibratedWhite: 0.12, alpha: 0.88).cgColor
+    root.layer?.cornerRadius = fallbackHeight / 2
+    root.layer?.masksToBounds = true
+
+    root.addSubview(stack)
+    NSLayoutConstraint.activate([
+      stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
+      stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
+      stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
+      stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
+    ])
+
+    root.layoutSubtreeIfNeeded()
+    return (root, targetSize)
   }
 
   private func hideToolbarPanel(
