@@ -30,23 +30,43 @@ lib/
 ├── main.dart                  # Entry point, service init, capture flow orchestration
 ├── app.dart                   # MaterialApp, state-driven routing
 ├── state/
-│   └── app_state.dart         # AppState (ChangeNotifier), CaptureStatus enum
+│   ├── app_state.dart         # AppState (ChangeNotifier), CaptureStatus enum
+│   └── annotation_state.dart  # Annotation editing state (undo/redo, active tool)
+├── models/
+│   ├── annotation.dart        # Shape data model (rect, ellipse, arrow, text, etc.)
+│   ├── annotation_handle.dart # Resize handle logic for shapes
+│   ├── annotation_hit_test.dart # Hit testing for shape selection
+│   └── selection_handle.dart  # Region selection resize handles
 ├── services/
 │   ├── window_service.dart    # Window lifecycle, overlay control, platform channel bridge
 │   ├── tray_service.dart      # System tray menu (tray_manager)
-│   ├── hotkey_service.dart    # Global hotkeys (⌘⇧1 fullscreen, ⌘⇧2 region)
+│   ├── hotkey_service.dart    # Global hotkeys (⌘⇧1 region, ⌘⇧2 scroll, ⌘⇧3 fullscreen)
 │   ├── capture_service.dart   # Screenshot capture, image cropping, permissions
+│   ├── scroll_capture_service.dart # Auto-scroll stitching logic
 │   ├── clipboard_service.dart # PNG → system clipboard (super_clipboard)
 │   └── file_service.dart      # Save dialog + file write
 ├── screens/
-│   ├── preview_screen.dart          # Floating preview with toolbar
-│   └── region_selection_screen.dart # Fullscreen overlay for region/element selection
+│   ├── preview_screen.dart          # Floating preview with annotation toolbar
+│   ├── region_selection_screen.dart # Fullscreen overlay for region/element selection
+│   └── scroll_result_screen.dart    # Scroll capture preview and save
 ├── widgets/
-│   ├── preview_toolbar.dart   # Copy / Save / Discard buttons
-│   └── magnifier_loupe.dart   # 8x zoom loupe with crosshair + coordinates
-└── utils/
-    ├── constants.dart         # App name, tray icon path, hotkey definitions
-    └── file_naming.dart       # Screenshot filename: asnap_YYYY-MM-DD_HHMMSS.png
+│   ├── preview_toolbar.dart         # Copy / Save / Discard buttons
+│   ├── annotation_overlay.dart      # Interactive annotation editing layer
+│   ├── annotation_painter.dart      # CustomPainter for rendering shapes
+│   ├── magnifier_loupe.dart         # 10x zoom loupe with crosshair + coordinates
+│   ├── magnifier_loupe_preview.dart # Widget preview for loupe
+│   ├── shape_popover.dart           # Tool property popovers (color, stroke width)
+│   ├── tool_popover_mixin.dart      # Shared popover behavior for tools
+│   └── scroll_progress_badge.dart   # Scroll capture progress indicator
+├── utils/
+│   ├── constants.dart               # App name, tray icon path, hotkey definitions
+│   ├── file_naming.dart             # Screenshot filename: asnap_YYYY-MM-DD_HHMMSS.png
+│   ├── toolbar_layout.dart          # Toolbar positioning logic
+│   ├── toolbar_actions.dart         # Shared toolbar action handlers
+│   ├── annotation_compositor.dart   # Render annotations to image
+│   └── path_simplify.dart           # Ramer-Douglas-Peucker for freehand paths
+└── l10n/
+    └── app_en.arb                   # Localization strings
 ```
 
 ### macOS Native Layer
@@ -63,7 +83,7 @@ macos/Runner/
 ### Service Pattern
 
 Services are singletons initialized sequentially in `main.dart`:
-`AppState → CaptureService → ClipboardService → FileService → HotkeyService → TrayService → WindowService`
+`AppState → AnnotationState → CaptureService → ScrollCaptureService → ClipboardService → FileService → HotkeyService → TrayService → WindowService`
 
 Each service has a single responsibility, uses async methods, and communicates back to Dart via callbacks.
 
@@ -89,6 +109,8 @@ Channel: `com.asnap/window` — key methods:
 - `startEscMonitor` / `stopEscMonitor` — Escape key detection
 - `resizeToRect` / `repositionOverlay` — preview positioning
 - `activateApp` — bring app to front
+
+**Note:** The toolbar is now implemented entirely in Flutter (unified across platforms). Native toolbar panel was removed in v0.5.2.
 
 ## Code Conventions
 
