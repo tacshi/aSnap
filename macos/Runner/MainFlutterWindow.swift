@@ -1485,7 +1485,8 @@ class MainFlutterWindow: NSWindow {
     // toolbar in those intermediate states causes visible jumps/flashes.
     guard self.isVisible, self.alphaValue > 0.99 else {
       self.pendingToolbarArgs = args
-      self.hideToolbarPanel(clearPending: false)
+      // Internal transition hide: keep last args for stale-update filtering.
+      self.hideToolbarPanel(clearPending: false, clearLastArgs: false)
       return
     }
     self.pendingToolbarArgs = nil
@@ -1740,12 +1741,19 @@ class MainFlutterWindow: NSWindow {
     panel.contentView = root
   }
 
-  private func hideToolbarPanel(clearPending: Bool = true, minRequestId: Int? = nil) {
+  private func hideToolbarPanel(
+    clearPending: Bool = true,
+    clearLastArgs: Bool = true,
+    minRequestId: Int? = nil
+  ) {
     if let minRequestId = minRequestId, minRequestId > self.latestToolbarRequestId {
       self.latestToolbarRequestId = minRequestId
     }
     if clearPending {
       pendingToolbarArgs = nil
+    }
+    if clearLastArgs {
+      lastToolbarArgs = nil
     }
     for button in self.toolbarButtons.values {
       if let toolbarButton = button as? ToolbarButton {
