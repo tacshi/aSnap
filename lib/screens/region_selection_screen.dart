@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../models/annotation.dart';
 import '../models/annotation_handle.dart';
@@ -91,6 +92,7 @@ class RegionSelectionScreen extends StatefulWidget {
 class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     with ToolPopoverMixin {
   final _focusNode = FocusNode();
+  bool _focusRetryRunning = false;
   late final void Function(String) _toolbarActionHandler;
 
   // -- Interaction state --
@@ -164,6 +166,30 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     removePopover();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  // -----------------------------------------------------------------------
+  // Focus management
+  // -----------------------------------------------------------------------
+
+  void _scheduleFocusSync() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _focusNode.hasFocus || _focusRetryRunning) return;
+      _focusRetryRunning = true;
+      _requestFocusWithRetry().whenComplete(() {
+        _focusRetryRunning = false;
+      });
+    });
+  }
+
+  Future<void> _requestFocusWithRetry() async {
+    for (var attempt = 0; attempt < 20; attempt++) {
+      if (!mounted || _focusNode.hasFocus) return;
+      await windowManager.focus();
+      _focusNode.requestFocus();
+      if (_focusNode.hasFocus) return;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
   }
 
   /// Computed selection rect during drawing phase (from two points).
@@ -1002,6 +1028,8 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
 
   @override
   Widget build(BuildContext context) {
+    _scheduleFocusSync();
+
     final selectionActive = !widget.isScrollSelection && _selectionRect != null;
     if (widget.windowService.overlaySelectionActive != selectionActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
