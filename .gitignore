@@ -67,6 +67,7 @@ lib/generated_plugin_registrant.dart
 
 # macOS
 .DS_Store
+releases/
 
 # Flutter metadata
 .metadata
