@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS-blue" alt="macOS">
-  <img src="https://img.shields.io/badge/platform-Windows-coming_soon-lightgrey" alt="Windows (coming soon)">
+  <img src="https://img.shields.io/badge/platform-Windows%20coming%20soon-lightgrey" alt="Windows (coming soon)">
   <img src="https://img.shields.io/badge/built_with-Flutter-02569B" alt="Flutter">
 </p>
 
