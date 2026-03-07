@@ -209,6 +209,58 @@ ensure_clean_tracked_worktree() {
     fi
 }
 
+resolve_local_tag_commit() {
+    local tag_name="$1"
+
+    git rev-parse --verify --quiet "refs/tags/$tag_name^{}" 2>/dev/null
+}
+
+resolve_remote_tag_commit() {
+    local remote_name="$1"
+    local tag_name="$2"
+    local remote_refs=""
+    local exact_sha=""
+    local sha
+    local ref
+
+    if ! remote_refs=$(git ls-remote --tags "$remote_name" "refs/tags/$tag_name" "refs/tags/$tag_name^{}" 2>/dev/null); then
+        log_error "Failed to query remote tag $tag_name from $remote_name"
+        exit 1
+    fi
+
+    while IFS=$'\t' read -r sha ref; do
+        [[ -n "$sha" && -n "$ref" ]] || continue
+        case "$ref" in
+            "refs/tags/$tag_name^{}")
+                echo "$sha"
+                return 0
+                ;;
+            "refs/tags/$tag_name")
+                exact_sha="$sha"
+                ;;
+        esac
+    done <<< "$remote_refs"
+
+    if [[ -n "$exact_sha" ]]; then
+        echo "$exact_sha"
+        return 0
+    fi
+
+    return 1
+}
+
+ensure_tag_points_to_head() {
+    local scope="$1"
+    local tag_name="$2"
+    local tag_commit="$3"
+    local head_commit="$4"
+
+    if [[ "$tag_commit" != "$head_commit" ]]; then
+        log_error "$scope git tag $tag_name points to $tag_commit, not HEAD $head_commit"
+        exit 1
+    fi
+}
+
 sign_nested_code() {
     local app_path="$1"
     local frameworks_dir="$app_path/Contents/Frameworks"
@@ -386,7 +438,7 @@ for file_path in "$PUBSPEC_FILE" "$RELEASE_ENTITLEMENTS"; do
     fi
 done
 
-for cmd in flutter codesign security ditto hdiutil xcrun spctl git; do
+for cmd in flutter codesign security ditto hdiutil xcrun spctl git perl; do
     require_command "$cmd"
 done
 
@@ -426,6 +478,10 @@ echo "$RELEASE_NOTES" | head -5 | while IFS= read -r line; do
     log_info "  $line"
 done
 
+if [[ "$NO_UPLOAD" == "false" ]]; then
+    ensure_clean_tracked_worktree
+fi
+
 if [[ "$DRY_RUN" == "true" ]]; then
     log_step "DRY RUN COMPLETE"
     log_success "All release prerequisites look good"
@@ -445,10 +501,6 @@ if [[ "$PUBSPEC_VERSION" != "$TARGET_PUBSPEC_VERSION" ]]; then
     fi
 else
     log_info "pubspec.yaml already at $TARGET_PUBSPEC_VERSION"
-fi
-
-if [[ "$NO_UPLOAD" == "false" ]]; then
-    ensure_clean_tracked_worktree
 fi
 
 log_step "3. Building release app"
@@ -496,6 +548,7 @@ fi
 
 if [[ "$NO_UPLOAD" == "false" ]]; then
     log_step "7. Publishing GitHub release"
+    HEAD_COMMIT=$(git rev-parse HEAD)
 
     if gh release view "$TAG_NAME" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
         log_error "GitHub release already exists for $TAG_NAME"
@@ -503,15 +556,17 @@ if [[ "$NO_UPLOAD" == "false" ]]; then
     fi
 
     if [[ "$NO_TAG" == "false" ]]; then
-        if ! git rev-parse --verify --quiet "refs/tags/$TAG_NAME" >/dev/null; then
+        if LOCAL_TAG_COMMIT=$(resolve_local_tag_commit "$TAG_NAME"); then
+            ensure_tag_points_to_head "Local" "$TAG_NAME" "$LOCAL_TAG_COMMIT" "$HEAD_COMMIT"
+            log_info "Local git tag already exists at HEAD: $TAG_NAME"
+        else
             git tag -a "$TAG_NAME" -m "Release $BUILD_NAME"
             log_success "Created local git tag: $TAG_NAME"
-        else
-            log_info "Local git tag already exists: $TAG_NAME"
         fi
 
-        if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
-            log_info "Remote git tag already exists: $TAG_NAME"
+        if REMOTE_TAG_COMMIT=$(resolve_remote_tag_commit origin "$TAG_NAME"); then
+            ensure_tag_points_to_head "Remote" "$TAG_NAME" "$REMOTE_TAG_COMMIT" "$HEAD_COMMIT"
+            log_info "Remote git tag already exists at HEAD: $TAG_NAME"
         else
             git push origin "refs/tags/$TAG_NAME:refs/tags/$TAG_NAME" >&2
             log_success "Pushed git tag: $TAG_NAME"

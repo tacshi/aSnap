@@ -100,7 +100,7 @@ For a signed macOS release build intended for offline distribution, use:
 ./scripts/release.sh --dry-run
 ```
 
-The release script does not integrate Sparkle or any auto-update feed. It updates `pubspec.yaml` to the requested version, signs the app with your `Developer ID Application` certificate, optionally notarizes it with `notarytool`, writes the final `.app` and `.dmg` to `releases/`, and by default creates a GitHub Release in `tacshi/aSnap` with the DMG attached.
+The release script does not integrate Sparkle or any auto-update feed. It updates `pubspec.yaml` to the requested version, creates a git commit for the version bump, signs the app with your `Developer ID Application` certificate, optionally notarizes it with `notarytool`, writes the final `.app` and `.dmg` to `releases/`, and by default creates a GitHub Release in `tacshi/aSnap` with the DMG attached. When uploading, it may also create and push a git tag for the release.
 
 For signing, install a `Developer ID Application` certificate in your keychain or set `DEVELOPER_ID_APPLICATION`. For notarization, configure a notarytool keychain profile named `aSnap`. If no working notary profile is available, the script still produces signed artifacts and skips notarization with a warning. GitHub publishing requires `gh auth login`.
 
