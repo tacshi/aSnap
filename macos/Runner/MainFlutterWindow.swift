@@ -827,24 +827,8 @@ class MainFlutterWindow: NSWindow {
             let equiv = item["keyEquivalent"] as? String
           else { continue }
 
-          var mask: NSEvent.ModifierFlags = []
-          if let mods = item["modifiers"] as? [String] {
-            for mod in mods {
-              switch mod {
-              case "command":
-                mask.insert(.command)
-              case "shift":
-                mask.insert(.shift)
-              case "option":
-                mask.insert(.option)
-              case "control":
-                mask.insert(.control)
-              default:
-                break
-              }
-            }
-          }
-
+          let mods = item["modifiers"] as? [String] ?? []
+          let mask = self.shortcutModifierMask(from: mods)
           shortcuts[label] = (equiv, mask)
         }
         self.trayShortcuts = shortcuts

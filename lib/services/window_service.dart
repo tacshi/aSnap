@@ -697,17 +697,26 @@ class WindowService {
       );
     }
 
-    final result = await _channel.invokeMethod<Map>('setLaunchAtLoginEnabled', {
-      'enabled': enabled,
-    });
-    if (result == null) {
+    try {
+      final result = await _channel.invokeMethod<Map>(
+        'setLaunchAtLoginEnabled',
+        {'enabled': enabled},
+      );
+      if (result == null) {
+        return const LaunchAtLoginState(
+          supported: false,
+          enabled: false,
+          requiresApproval: false,
+        );
+      }
+      return LaunchAtLoginState.fromMap(result);
+    } on MissingPluginException {
       return const LaunchAtLoginState(
         supported: false,
         enabled: false,
         requiresApproval: false,
       );
     }
-    return LaunchAtLoginState.fromMap(result);
   }
 
   // ---------------------------------------------------------------------------

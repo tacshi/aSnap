@@ -2,10 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
-// ignore: implementation_imports
-import 'package:uni_platform/src/extensions/keyboard_key.dart';
 
 import '../models/shortcut_bindings.dart';
+import '../utils/macos_key_codes.dart';
 
 class HotkeyService {
   static const _dedupeWindow = Duration(milliseconds: 150);
@@ -152,7 +151,7 @@ class HotkeyService {
     ShortcutAction action,
     HotKey hotKey,
   ) {
-    final keyCode = hotKey.physicalKey.keyCode;
+    final keyCode = macOsKeyCodeForPhysicalKey(hotKey.physicalKey);
     if (keyCode == null) {
       throw Exception('Failed to encode ${action.name} shortcut key code.');
     }

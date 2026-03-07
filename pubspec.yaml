@@ -19,9 +19,6 @@ dependencies:
   # Global system-wide hotkeys
   hotkey_manager: ^0.2.3
 
-  # Platform-specific utilities (needed for keyCode extension)
-  uni_platform: ^0.1.3
-
   # Window management (hide/show, skip taskbar, always-on-top)
   window_manager: ^0.5.1
 

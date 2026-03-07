@@ -87,7 +87,7 @@ void main() {
       ).singleWhere((item) => item['action'] == ShortcutAction.region.name);
 
       expect(regionDescriptor['modifiers'], ['control', 'shift']);
-      expect(regionDescriptor['keyCode'], isA<int>());
+      expect(regionDescriptor['keyCode'], 0x0000000f);
     },
     skip: !Platform.isMacOS,
   );
@@ -122,6 +122,36 @@ void main() {
       ).singleWhere((item) => item['action'] == ShortcutAction.region.name);
 
       expect(regionDescriptor['modifiers'], ['control', 'meta', 'shift']);
+    },
+    skip: !Platform.isMacOS,
+  );
+
+  test(
+    'registers function key shortcuts through the native macOS channel',
+    () async {
+      final service = HotkeyService();
+
+      await service.initialize(
+        bindings: bindingsWithRegionShortcut(
+          key: PhysicalKeyboardKey.f12,
+          modifiers: const [HotKeyModifier.control, HotKeyModifier.shift],
+        ),
+        onFullScreen: () {},
+        onRegion: () {},
+        onScrollCapture: () {},
+        onPin: () {},
+      );
+
+      addTearDown(service.unregisterAll);
+
+      final setHotkeysCall = nativeCalls.singleWhere(
+        (call) => call.method == 'setHotkeys',
+      );
+      final regionDescriptor = registeredDescriptors(
+        setHotkeysCall,
+      ).singleWhere((item) => item['action'] == ShortcutAction.region.name);
+
+      expect(regionDescriptor['keyCode'], 0x0000006f);
     },
     skip: !Platform.isMacOS,
   );
