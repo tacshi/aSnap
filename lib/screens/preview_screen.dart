@@ -25,6 +25,7 @@ class PreviewScreen extends StatefulWidget {
   final VoidCallback onSave;
   final VoidCallback? onPin;
   final VoidCallback onDiscard;
+  final VoidCallback onOcr;
 
   const PreviewScreen({
     super.key,
@@ -35,6 +36,7 @@ class PreviewScreen extends StatefulWidget {
     required this.onSave,
     this.onPin,
     required this.onDiscard,
+    required this.onOcr,
   });
 
   @override
@@ -65,6 +67,9 @@ class _PreviewScreenState extends State<PreviewScreen>
 
   @override
   bool get nativeToolbarShowPin => widget.onPin != null;
+
+  @override
+  bool get nativeToolbarShowOcr => true;
 
   @override
   bool get nativeToolbarAnchorToWindow => true;
@@ -215,6 +220,9 @@ class _PreviewScreenState extends State<PreviewScreen>
       case 'pin':
         widget.onPin?.call();
         return;
+      case 'ocr':
+        widget.onOcr();
+        return;
       case 'close':
         widget.onDiscard();
         return;
@@ -267,6 +275,7 @@ class _PreviewScreenState extends State<PreviewScreen>
               final toolbarSize = computeNativeToolbarSize(
                 showPin: widget.onPin != null,
                 showHistoryControls: true,
+                showOcr: nativeToolbarShowOcr,
               );
               final imageViewport = constraints.biggest;
               final fitted = applyBoxFit(

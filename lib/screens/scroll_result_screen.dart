@@ -23,6 +23,7 @@ class ScrollResultScreen extends StatefulWidget {
   final VoidCallback onCopy;
   final VoidCallback onSave;
   final VoidCallback onDiscard;
+  final VoidCallback onOcr;
 
   const ScrollResultScreen({
     super.key,
@@ -32,6 +33,7 @@ class ScrollResultScreen extends StatefulWidget {
     required this.onCopy,
     required this.onSave,
     required this.onDiscard,
+    required this.onOcr,
   });
 
   @override
@@ -59,6 +61,9 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
 
   @override
   bool get nativeToolbarShowPin => false;
+
+  @override
+  bool get nativeToolbarShowOcr => true;
 
   @override
   void initState() {
@@ -147,6 +152,9 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
       case 'save':
         widget.onSave();
         return;
+      case 'ocr':
+        widget.onOcr();
+        return;
       case 'close':
         widget.onDiscard();
         return;
@@ -219,6 +227,7 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
           final toolbarSize = computeNativeToolbarSize(
             showPin: false,
             showHistoryControls: true,
+            showOcr: nativeToolbarShowOcr,
           );
           final containerRect = _imageContainerRect(
             screenSize,

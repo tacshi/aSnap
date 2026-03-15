@@ -75,6 +75,7 @@ void main() {
         onRegion: () {},
         onScrollCapture: () {},
         onPin: () {},
+        onOcr: () {},
       );
 
       addTearDown(service.unregisterAll);
@@ -110,6 +111,7 @@ void main() {
         onRegion: () {},
         onScrollCapture: () {},
         onPin: () {},
+        onOcr: () {},
       );
 
       addTearDown(service.unregisterAll);
@@ -140,6 +142,7 @@ void main() {
         onRegion: () {},
         onScrollCapture: () {},
         onPin: () {},
+        onOcr: () {},
       );
 
       addTearDown(service.unregisterAll);
@@ -172,6 +175,7 @@ void main() {
           onRegion: () {},
           onScrollCapture: () {},
           onPin: () {},
+          onOcr: () {},
         ),
         throwsA(
           isA<Exception>().having(
@@ -202,6 +206,7 @@ void main() {
         },
         onScrollCapture: () {},
         onPin: () {},
+        onOcr: () {},
       );
 
       addTearDown(service.unregisterAll);
@@ -237,6 +242,7 @@ void main() {
         onRegion: () {},
         onScrollCapture: () {},
         onPin: () {},
+        onOcr: () {},
       );
 
       addTearDown(service.unregisterAll);

@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 
-enum ShortcutAction { region, scrollCapture, fullScreen, pin }
+enum ShortcutAction { region, scrollCapture, fullScreen, pin, ocr }
 
 extension ShortcutActionX on ShortcutAction {
   String get id => switch (this) {
@@ -12,6 +12,7 @@ extension ShortcutActionX on ShortcutAction {
     ShortcutAction.scrollCapture => 'shortcut_scroll_capture',
     ShortcutAction.fullScreen => 'shortcut_full_screen',
     ShortcutAction.pin => 'shortcut_pin',
+    ShortcutAction.ocr => 'shortcut_ocr',
   };
 
   String get label => switch (this) {
@@ -19,6 +20,7 @@ extension ShortcutActionX on ShortcutAction {
     ShortcutAction.scrollCapture => 'Scroll',
     ShortcutAction.fullScreen => 'Full Screen',
     ShortcutAction.pin => 'Pin',
+    ShortcutAction.ocr => 'OCR',
   };
 
   String get description => switch (this) {
@@ -26,6 +28,7 @@ extension ShortcutActionX on ShortcutAction {
     ShortcutAction.scrollCapture => 'Start scroll capture mode.',
     ShortcutAction.fullScreen => 'Capture the display under the cursor.',
     ShortcutAction.pin => 'Pin the latest copied image to the screen.',
+    ShortcutAction.ocr => 'Start an OCR region capture.',
   };
 }
 
@@ -35,6 +38,7 @@ class ShortcutBindings {
     required this.scrollCapture,
     required this.fullScreen,
     required this.pin,
+    required this.ocr,
   });
 
   factory ShortcutBindings.defaults() {
@@ -64,6 +68,11 @@ class ShortcutBindings {
         key: PhysicalKeyboardKey.keyP,
         modifiers: [primaryModifier, secondaryModifier],
       ),
+      ocr: defaultShortcutFor(
+        ShortcutAction.ocr,
+        key: PhysicalKeyboardKey.keyO,
+        modifiers: [primaryModifier, secondaryModifier],
+      ),
     );
   }
 
@@ -86,6 +95,7 @@ class ShortcutBindings {
       scrollCapture: read(ShortcutAction.scrollCapture, defaults.scrollCapture),
       fullScreen: read(ShortcutAction.fullScreen, defaults.fullScreen),
       pin: read(ShortcutAction.pin, defaults.pin),
+      ocr: read(ShortcutAction.ocr, defaults.ocr),
     );
   }
 
@@ -93,12 +103,14 @@ class ShortcutBindings {
   final HotKey scrollCapture;
   final HotKey fullScreen;
   final HotKey pin;
+  final HotKey ocr;
 
   Iterable<MapEntry<ShortcutAction, HotKey>> get entries sync* {
     yield MapEntry(ShortcutAction.region, region);
     yield MapEntry(ShortcutAction.scrollCapture, scrollCapture);
     yield MapEntry(ShortcutAction.fullScreen, fullScreen);
     yield MapEntry(ShortcutAction.pin, pin);
+    yield MapEntry(ShortcutAction.ocr, ocr);
   }
 
   HotKey forAction(ShortcutAction action) => switch (action) {
@@ -106,6 +118,7 @@ class ShortcutBindings {
     ShortcutAction.scrollCapture => scrollCapture,
     ShortcutAction.fullScreen => fullScreen,
     ShortcutAction.pin => pin,
+    ShortcutAction.ocr => ocr,
   };
 
   ShortcutBindings copyWithAction(ShortcutAction action, HotKey hotKey) {
@@ -117,6 +130,7 @@ class ShortcutBindings {
           : scrollCapture,
       fullScreen: action == ShortcutAction.fullScreen ? normalized : fullScreen,
       pin: action == ShortcutAction.pin ? normalized : pin,
+      ocr: action == ShortcutAction.ocr ? normalized : ocr,
     );
   }
 
@@ -125,6 +139,7 @@ class ShortcutBindings {
     ShortcutAction.scrollCapture.name: scrollCapture.toJson(),
     ShortcutAction.fullScreen.name: fullScreen.toJson(),
     ShortcutAction.pin.name: pin.toJson(),
+    ShortcutAction.ocr.name: ocr.toJson(),
   };
 
   ShortcutValidationResult validate() {

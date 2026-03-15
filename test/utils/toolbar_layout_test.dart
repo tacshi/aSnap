@@ -9,6 +9,7 @@ void main() {
       final size = computeNativeToolbarSize(
         showPin: false,
         showHistoryControls: false,
+        showOcr: false,
       );
 
       expect(size, const Size(329, 44));
@@ -18,24 +19,35 @@ void main() {
       final base = computeNativeToolbarSize(
         showPin: false,
         showHistoryControls: false,
+        showOcr: false,
+      );
+      final withOcr = computeNativeToolbarSize(
+        showPin: false,
+        showHistoryControls: false,
+        showOcr: true,
       );
       final withPin = computeNativeToolbarSize(
         showPin: true,
         showHistoryControls: false,
+        showOcr: false,
       );
       final withHistory = computeNativeToolbarSize(
         showPin: false,
         showHistoryControls: true,
+        showOcr: false,
       );
       final full = computeNativeToolbarSize(
         showPin: true,
         showHistoryControls: true,
+        showOcr: false,
       );
 
+      expect(withOcr, const Size(355, 44));
       expect(withPin, const Size(355, 44));
       expect(withHistory, const Size(386, 44));
       expect(full, const Size(412, 44));
       expect(withPin.width, greaterThan(base.width));
+      expect(withOcr.width, greaterThan(base.width));
       expect(withHistory.width, greaterThan(base.width));
       expect(full.width, greaterThan(withHistory.width));
     });

@@ -9,11 +9,15 @@ import '../services/window_service.dart';
 class SettingsState extends ChangeNotifier {
   SettingsState({
     required ShortcutBindings initialShortcuts,
+    required bool initialOcrPreviewEnabled,
+    required bool initialOcrOpenUrlPromptEnabled,
     required SettingsService settingsService,
     required WindowService windowService,
     required HotkeyService hotkeyService,
     required TrayService trayService,
   }) : _shortcuts = initialShortcuts,
+       _ocrPreviewEnabled = initialOcrPreviewEnabled,
+       _ocrOpenUrlPromptEnabled = initialOcrOpenUrlPromptEnabled,
        _settingsService = settingsService,
        _windowService = windowService,
        _hotkeyService = hotkeyService,
@@ -26,6 +30,18 @@ class SettingsState extends ChangeNotifier {
 
   ShortcutBindings _shortcuts;
   ShortcutBindings get shortcuts => _shortcuts;
+
+  bool _ocrPreviewEnabled = false;
+  bool get ocrPreviewEnabled => _ocrPreviewEnabled;
+
+  String? _ocrPreviewError;
+  String? get ocrPreviewError => _ocrPreviewError;
+
+  bool _ocrOpenUrlPromptEnabled = true;
+  bool get ocrOpenUrlPromptEnabled => _ocrOpenUrlPromptEnabled;
+
+  String? _ocrOpenUrlPromptError;
+  String? get ocrOpenUrlPromptError => _ocrOpenUrlPromptError;
 
   bool _launchAtLoginSupported = false;
   bool get launchAtLoginSupported => _launchAtLoginSupported;
@@ -117,6 +133,50 @@ class SettingsState extends ChangeNotifier {
   void clearShortcutError() {
     if (_shortcutError == null) return;
     _shortcutError = null;
+    notifyListeners();
+  }
+
+  Future<void> setOcrPreviewEnabled(bool enabled) async {
+    if (_ocrPreviewEnabled == enabled) return;
+    final previous = _ocrPreviewEnabled;
+    _ocrPreviewEnabled = enabled;
+    _ocrPreviewError = null;
+    notifyListeners();
+
+    try {
+      await _settingsService.saveOcrPreviewEnabled(enabled);
+    } catch (error) {
+      _ocrPreviewEnabled = previous;
+      _ocrPreviewError = error.toString();
+      notifyListeners();
+    }
+  }
+
+  void clearOcrPreviewError() {
+    if (_ocrPreviewError == null) return;
+    _ocrPreviewError = null;
+    notifyListeners();
+  }
+
+  Future<void> setOcrOpenUrlPromptEnabled(bool enabled) async {
+    if (_ocrOpenUrlPromptEnabled == enabled) return;
+    final previous = _ocrOpenUrlPromptEnabled;
+    _ocrOpenUrlPromptEnabled = enabled;
+    _ocrOpenUrlPromptError = null;
+    notifyListeners();
+
+    try {
+      await _settingsService.saveOcrOpenUrlPromptEnabled(enabled);
+    } catch (error) {
+      _ocrOpenUrlPromptEnabled = previous;
+      _ocrOpenUrlPromptError = error.toString();
+      notifyListeners();
+    }
+  }
+
+  void clearOcrOpenUrlPromptError() {
+    if (_ocrOpenUrlPromptError == null) return;
+    _ocrOpenUrlPromptError = null;
     notifyListeners();
   }
 

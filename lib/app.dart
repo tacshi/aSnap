@@ -15,11 +15,14 @@ class ASnapApp extends StatelessWidget {
   final AnnotationState annotationState;
   final SettingsState settingsState;
   final WindowService windowService;
+  final GlobalKey<NavigatorState> navigatorKey;
   final VoidCallback onCopy;
   final VoidCallback onSave;
   final VoidCallback? onPin;
   final VoidCallback onDiscard;
+  final VoidCallback onOcr;
   final void Function(Rect selectionRect) onRegionSelected;
+  final void Function(Rect selectionRect) onRegionOcr;
 
   /// Snipaste-style overlay actions for region capture.
   final void Function(Rect selectionRect)? onRegionCopy;
@@ -40,11 +43,14 @@ class ASnapApp extends StatelessWidget {
     required this.annotationState,
     required this.settingsState,
     required this.windowService,
+    required this.navigatorKey,
     required this.onCopy,
     required this.onSave,
     this.onPin,
     required this.onDiscard,
+    required this.onOcr,
     required this.onRegionSelected,
+    required this.onRegionOcr,
     this.onRegionCopy,
     this.onRegionSave,
     this.onRegionPin,
@@ -63,6 +69,7 @@ class ASnapApp extends StatelessWidget {
     return MaterialApp(
       title: 'aSnap',
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
       theme: ThemeData.dark(useMaterial3: true).copyWith(
         // Transparent canvas so the rainbow border overlay renders correctly
         // on the transparent NSWindow. Other screens (preview, region selection)
@@ -77,7 +84,7 @@ class ASnapApp extends StatelessWidget {
             case RegionSelectionWorkflow(
               :final decodedImage,
               :final windowRects,
-              isScrollSelection: false,
+              selectionMode: SelectionMode.region,
             ):
               return RegionSelectionScreen(
                 decodedImage: decodedImage,
@@ -87,13 +94,14 @@ class ASnapApp extends StatelessWidget {
                 onCopy: onRegionCopy,
                 onSave: onRegionSave,
                 onPin: onRegionPin,
+                onOcr: onRegionOcr,
                 onHitTest: onHitTest,
                 annotationState: annotationState,
               );
             case RegionSelectionWorkflow(
               :final decodedImage,
               :final windowRects,
-              isScrollSelection: true,
+              selectionMode: SelectionMode.scroll,
             ):
               return RegionSelectionScreen(
                 decodedImage: decodedImage,
@@ -102,7 +110,21 @@ class ASnapApp extends StatelessWidget {
                 windowService: windowService,
                 onRegionSelected: onScrollRegionSelected ?? onRegionSelected,
                 onHitTest: onHitTest,
-                isScrollSelection: true,
+                isQuickSelection: true,
+              );
+            case RegionSelectionWorkflow(
+              :final decodedImage,
+              :final windowRects,
+              selectionMode: SelectionMode.ocr,
+            ):
+              return RegionSelectionScreen(
+                decodedImage: decodedImage,
+                windowRects: windowRects,
+                onCancel: onRegionCancel,
+                windowService: windowService,
+                onRegionSelected: onRegionOcr,
+                onHitTest: onHitTest,
+                isQuickSelection: true,
               );
             case ScrollCapturingWorkflow(
               :final frameCount,
@@ -128,6 +150,7 @@ class ASnapApp extends StatelessWidget {
                 onCopy: onCopy,
                 onSave: onSave,
                 onDiscard: onDiscard,
+                onOcr: onOcr,
               );
             case SettingsWorkflow():
               return SettingsScreen(
@@ -147,6 +170,7 @@ class ASnapApp extends StatelessWidget {
             onSave: onSave,
             onPin: onPin,
             onDiscard: onDiscard,
+            onOcr: onOcr,
           );
         },
       ),

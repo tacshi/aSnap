@@ -20,6 +20,7 @@ import 'state/annotation_state.dart';
 import 'state/app_state.dart';
 import 'state/settings_state.dart';
 import 'utils/annotation_compositor.dart';
+import 'utils/url_detection.dart';
 
 bool _displayChangeInProgress = false;
 bool _displayChangePending = false;
@@ -99,6 +100,8 @@ late final ScrollCaptureService _scrollCaptureService;
 late final SettingsService _settingsService;
 late final SettingsState _settingsState;
 late final WindowService _windowService;
+final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+bool _ocrInProgress = false;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -117,8 +120,14 @@ void main() async {
   await _windowService.ensureInitialized();
 
   final initialShortcuts = await _settingsService.loadShortcutBindings();
+  final initialOcrPreviewEnabled = await _settingsService
+      .loadOcrPreviewEnabled();
+  final initialOcrOpenUrlPromptEnabled = await _settingsService
+      .loadOcrOpenUrlPromptEnabled();
   _settingsState = SettingsState(
     initialShortcuts: initialShortcuts,
+    initialOcrPreviewEnabled: initialOcrPreviewEnabled,
+    initialOcrOpenUrlPromptEnabled: initialOcrOpenUrlPromptEnabled,
     settingsService: _settingsService,
     windowService: _windowService,
     hotkeyService: _hotkeyService,
@@ -131,11 +140,14 @@ void main() async {
       annotationState: _annotationState,
       settingsState: _settingsState,
       windowService: _windowService,
+      navigatorKey: _navigatorKey,
       onCopy: _handleCopy,
       onSave: _handleSave,
       onPin: _handlePin,
       onDiscard: _handleDiscard,
+      onOcr: _handleOcr,
       onRegionSelected: _handleRegionSelected,
+      onRegionOcr: _handleRegionOcr,
       onRegionCopy: _handleRegionCopy,
       onRegionSave: _handleRegionSave,
       onRegionPin: _handleRegionPin,
@@ -207,6 +219,7 @@ Future<void> _initAfterRunApp() async {
     onRegion: _handleRegionCapture,
     onScrollCapture: _handleScrollCapture,
     onPin: _handlePin,
+    onOcr: _handleOcrShortcut,
   );
 
   // Start background rect polling — keeps top-level window rects warm
@@ -458,14 +471,16 @@ Future<void> _handleFullScreenCapture() async {
   }
 }
 
-Future<void> _handleRegionCapture() async {
-  if (_appState.workflow is PreparingCaptureWorkflow) return;
+Future<void> _startSelectionCapture({
+  required CaptureKind kind,
+  required SelectionMode selectionMode,
+}) async {
   _escActionInProgress = false;
   _clearLastCopiedPinCache();
   await _windowService.stopEscMonitor();
   // Allow re-entry from selecting state (display-change re-trigger).
   _annotationState.clear();
-  _appState.setPreparingCapture(kind: CaptureKind.region);
+  _appState.setPreparingCapture(kind: kind);
   _regionCaptureCancelled = false;
   await _windowService.hidePreview();
   _clearDisplayCaches();
@@ -525,12 +540,29 @@ Future<void> _handleRegionCapture() async {
       return;
     }
 
-    _appState.setSelecting(
-      decodedImage: decodedImage,
-      windowRects: localRects,
-      screenSize: capture.screenSize,
-      screenOrigin: capture.screenOrigin,
-    );
+    switch (selectionMode) {
+      case SelectionMode.region:
+        _appState.setSelecting(
+          decodedImage: decodedImage,
+          windowRects: localRects,
+          screenSize: capture.screenSize,
+          screenOrigin: capture.screenOrigin,
+        );
+      case SelectionMode.scroll:
+        _appState.setScrollSelecting(
+          decodedImage: decodedImage,
+          windowRects: localRects,
+          screenSize: capture.screenSize,
+          screenOrigin: capture.screenOrigin,
+        );
+      case SelectionMode.ocr:
+        _appState.setOcrSelecting(
+          decodedImage: decodedImage,
+          windowRects: localRects,
+          screenSize: capture.screenSize,
+          screenOrigin: capture.screenOrigin,
+        );
+    }
 
     // Enter overlay mode — window configured + positioned but stays invisible.
     await _windowService.showFullScreenOverlay(
@@ -571,6 +603,22 @@ Future<void> _handleRegionCapture() async {
     await _windowService.stopEscMonitor();
     await _windowService.startRectPolling();
   }
+}
+
+Future<void> _handleRegionCapture() async {
+  if (_appState.workflow is PreparingCaptureWorkflow) return;
+  await _startSelectionCapture(
+    kind: CaptureKind.region,
+    selectionMode: SelectionMode.region,
+  );
+}
+
+Future<void> _handleOcrShortcut() async {
+  if (_appState.workflow is PreparingCaptureWorkflow) return;
+  await _startSelectionCapture(
+    kind: CaptureKind.ocr,
+    selectionMode: SelectionMode.ocr,
+  );
 }
 
 /// Called when the cursor moves to a different display during overlay mode.
@@ -629,6 +677,13 @@ Future<void> _handleDisplayChanged() async {
     // Preserve the current status (selecting or scrollSelecting).
     if (selection.isScrollSelection) {
       _appState.setScrollSelecting(
+        decodedImage: decodedImage,
+        windowRects: localRects,
+        screenSize: capture.screenSize,
+        screenOrigin: capture.screenOrigin,
+      );
+    } else if (selection.isOcrSelection) {
+      _appState.setOcrSelecting(
         decodedImage: decodedImage,
         windowRects: localRects,
         screenSize: capture.screenSize,
@@ -878,6 +933,79 @@ Future<void> _handleRegionSave(Rect logicalRect) async {
   decodedFullScreen.dispose();
 }
 
+Future<void> _handleRegionOcr(Rect logicalRect) async {
+  if (_ocrInProgress) return;
+  _windowService.overlaySelectionActive = false;
+  final selection = _appState.regionSelectionWorkflow;
+  if (selection == null) {
+    _appState.clear();
+    await _windowService.hidePreview();
+    return;
+  }
+  final decodedFullScreen = selection.decodedImage;
+  final screenSize = selection.screenSize;
+
+  final scaleX = decodedFullScreen.width / screenSize.width;
+  final scaleY = decodedFullScreen.height / screenSize.height;
+  final physicalRect = Rect.fromLTRB(
+    logicalRect.left * scaleX,
+    logicalRect.top * scaleY,
+    logicalRect.right * scaleX,
+    logicalRect.bottom * scaleY,
+  );
+
+  final showPreview =
+      _settingsState.ocrPreviewEnabled && !selection.isOcrSelection;
+  final keepWindowVisible =
+      showPreview || _settingsState.ocrOpenUrlPromptEnabled;
+  var windowHidden = false;
+
+  _ocrInProgress = true;
+  _appState.detachDecodedFullScreen();
+  try {
+    await _windowService.hideToolbarPanel();
+    if (!keepWindowVisible) {
+      // Hide FIRST — user perceives instant dismiss when no UI is needed.
+      await _windowService.hidePreview();
+      _appState.clear();
+      _annotationState.clear();
+      _clearDisplayCaches();
+      unawaited(_windowService.stopEscMonitor());
+      unawaited(_windowService.suspendOverlay());
+      unawaited(_windowService.startRectPolling());
+      windowHidden = true;
+    }
+
+    final cropped = await _captureService.cropImage(
+      decodedFullScreen,
+      physicalRect,
+    );
+    if (cropped == null) return;
+
+    final byteData = await cropped.toByteData(format: ui.ImageByteFormat.png);
+    final pngBytes = byteData?.buffer.asUint8List();
+    if (pngBytes != null) {
+      final normalized = await _recognizeTextFromPng(pngBytes);
+      if (normalized != null) {
+        await _applyOcrResult(normalized, showPreview: showPreview);
+      }
+    }
+    cropped.dispose();
+  } finally {
+    _ocrInProgress = false;
+    if (!windowHidden) {
+      await _windowService.hidePreview();
+      _appState.clear();
+      _annotationState.clear();
+      _clearDisplayCaches();
+      unawaited(_windowService.stopEscMonitor());
+      unawaited(_windowService.suspendOverlay());
+      unawaited(_windowService.startRectPolling());
+    }
+    decodedFullScreen.dispose();
+  }
+}
+
 Future<void> _handleRegionCancel() async {
   _windowService.overlaySelectionActive = false;
   // Hide window BEFORE clearing state — instant dismiss.
@@ -992,6 +1120,159 @@ Future<void> _handleDiscard() async {
   unawaited(_windowService.stopEscMonitor());
   if (wasScrollResult) unawaited(_windowService.cleanupOverlay());
   unawaited(_windowService.startRectPolling());
+}
+
+Future<String?> _recognizeTextFromPng(Uint8List pngBytes) async {
+  final text = await _windowService.recognizeText(pngBytes: pngBytes);
+  if (text == null) return null;
+  return text.trim();
+}
+
+Future<void> _openUrlInBrowser(String url) async {
+  await _windowService.openUrl(url);
+}
+
+Future<void> _showOpenUrlPrompt(String url) async {
+  final context = _navigatorKey.currentContext;
+  if (context == null) return;
+
+  await showDialog<void>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF2A2A2A),
+        title: const Text('Open URL?', style: TextStyle(color: Colors.white)),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: SelectableText(
+            url,
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              unawaited(_openUrlInBrowser(url));
+            },
+            child: const Text('Open'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+Future<void> _applyOcrResult(String text, {required bool showPreview}) async {
+  if (text.isNotEmpty) {
+    await _clipboardService.copyText(text);
+  }
+  final url = _settingsState.ocrOpenUrlPromptEnabled
+      ? extractFirstUrl(text)
+      : null;
+  if (showPreview) {
+    await _showOcrPreviewDialog(text, url: url);
+  } else if (url != null) {
+    await _showOpenUrlPrompt(url);
+  }
+}
+
+Future<void> _handleOcr() async {
+  if (_ocrInProgress) return;
+  final image = _appState.capturedImage;
+  if (image == null) return;
+
+  _ocrInProgress = true;
+  try {
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    final pngBytes = byteData?.buffer.asUint8List();
+    if (pngBytes == null) return;
+
+    final normalized = await _recognizeTextFromPng(pngBytes);
+    if (normalized == null) return;
+    await _applyOcrResult(
+      normalized,
+      showPreview: _settingsState.ocrPreviewEnabled,
+    );
+  } finally {
+    _ocrInProgress = false;
+  }
+}
+
+Future<void> _showOcrPreviewDialog(String text, {String? url}) async {
+  final context = _navigatorKey.currentContext;
+  if (context == null) return;
+
+  final hasText = text.trim().isNotEmpty;
+  await showDialog<void>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF2A2A2A),
+        title: const Text('OCR Result', style: TextStyle(color: Colors.white)),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 280),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SelectableText(
+                  hasText ? text : 'No text recognized.',
+                  style: TextStyle(
+                    color: hasText ? Colors.white70 : Colors.white54,
+                    height: 1.4,
+                  ),
+                ),
+                if (url != null) ...[
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Detected URL',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    url,
+                    style: const TextStyle(color: Colors.white70, height: 1.4),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          if (hasText)
+            TextButton(
+              onPressed: () {
+                unawaited(_clipboardService.copyText(text));
+              },
+              child: const Text('Copy'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+          if (url != null)
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                unawaited(_openUrlInBrowser(url));
+              },
+              child: const Text('Open URL'),
+            ),
+        ],
+      );
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1261,7 +1542,7 @@ void _handlePinnedImageClosed(int panelId) {
 Future<void> _handleScrollCapture() async {
   if (_appState.workflow is PreparingCaptureWorkflow ||
       switch (_appState.workflow) {
-        RegionSelectionWorkflow(isScrollSelection: true) => true,
+        RegionSelectionWorkflow(selectionMode: SelectionMode.scroll) => true,
         _ => false,
       }) {
     return;
@@ -1278,98 +1559,10 @@ Future<void> _handleScrollCapture() async {
     }
     return;
   }
-  _escActionInProgress = false;
-  _clearLastCopiedPinCache();
-  await _windowService.stopEscMonitor();
-  _annotationState.clear();
-  _appState.setPreparingCapture(kind: CaptureKind.scroll);
-  _regionCaptureCancelled = false;
-  await _windowService.hidePreview();
-  _clearDisplayCaches();
-
-  await _windowService.startEscMonitor();
-  await _windowService.stopRectPolling();
-
-  final capture = await _windowService.captureScreen();
-
-  if (_regionCaptureCancelled) {
-    _regionCaptureCancelled = false;
-    _appState.clear();
-    await _windowService.stopEscMonitor();
-    await _windowService.startRectPolling();
-    return;
-  }
-
-  if (capture != null) {
-    List<Rect> localRects;
-    if (_cachedGlobalWindows.isNotEmpty) {
-      localRects = _globalRectsToLocal(capture.screenOrigin);
-    } else {
-      final windows = await _windowService.getWindowList();
-      localRects = windows
-          .map(
-            (w) => w.rect.shift(
-              Offset(-capture.screenOrigin.dx, -capture.screenOrigin.dy),
-            ),
-          )
-          .toList();
-    }
-    _displayCaches[_displayKey(capture.screenOrigin)] = _DisplayCache(
-      localRects: localRects,
-    );
-
-    final decodedImage = await _decodeRawPixels(capture);
-
-    if (_regionCaptureCancelled) {
-      _regionCaptureCancelled = false;
-      decodedImage.dispose();
-      _appState.clear();
-      await _windowService.stopEscMonitor();
-      await _windowService.startRectPolling();
-      return;
-    }
-
-    _appState.setScrollSelecting(
-      decodedImage: decodedImage,
-      windowRects: localRects,
-      screenSize: capture.screenSize,
-      screenOrigin: capture.screenOrigin,
-    );
-
-    await _windowService.showFullScreenOverlay(
-      screenOrigin: capture.screenOrigin,
-    );
-
-    if (_regionCaptureCancelled) {
-      _regionCaptureCancelled = false;
-      await _windowService.hidePreview();
-      _appState.clear();
-      await _windowService.cleanupOverlay();
-      await _windowService.stopEscMonitor();
-      await _windowService.startRectPolling();
-      return;
-    }
-
-    await WidgetsBinding.instance.endOfFrame;
-    await WidgetsBinding.instance.endOfFrame;
-
-    if (_regionCaptureCancelled) {
-      _regionCaptureCancelled = false;
-      await _windowService.hidePreview();
-      _appState.clear();
-      await _windowService.cleanupOverlay();
-      await _windowService.stopEscMonitor();
-      await _windowService.startRectPolling();
-      return;
-    }
-
-    await _windowService.revealOverlay();
-    await _windowService.stopEscMonitor();
-  } else {
-    _appState.clear();
-    await _windowService.stopEscMonitor();
-    await _windowService.startRectPolling();
-  }
+  await _startSelectionCapture(
+    kind: CaptureKind.scroll,
+    selectionMode: SelectionMode.scroll,
+  );
 }
 
 Future<void> _handleScrollRegionSelected(Rect logicalRect) async {

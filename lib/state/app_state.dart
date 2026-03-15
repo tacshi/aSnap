@@ -2,7 +2,9 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
-enum CaptureKind { fullScreen, region, scroll }
+enum CaptureKind { fullScreen, region, scroll, ocr }
+
+enum SelectionMode { region, scroll, ocr }
 
 enum CaptureStatus {
   idle,
@@ -33,14 +35,14 @@ final class RegionSelectionWorkflow extends WorkflowState {
   final List<Rect> windowRects;
   final Size screenSize;
   final Offset screenOrigin;
-  final bool isScrollSelection;
+  final SelectionMode selectionMode;
 
   const RegionSelectionWorkflow({
     required this.decodedImage,
     required this.windowRects,
     required this.screenSize,
     required this.screenOrigin,
-    required this.isScrollSelection,
+    required this.selectionMode,
   });
 
   RegionSelectionWorkflow copyWith({
@@ -48,16 +50,20 @@ final class RegionSelectionWorkflow extends WorkflowState {
     List<Rect>? windowRects,
     Size? screenSize,
     Offset? screenOrigin,
-    bool? isScrollSelection,
+    SelectionMode? selectionMode,
   }) {
     return RegionSelectionWorkflow(
       decodedImage: decodedImage ?? this.decodedImage,
       windowRects: windowRects ?? this.windowRects,
       screenSize: screenSize ?? this.screenSize,
       screenOrigin: screenOrigin ?? this.screenOrigin,
-      isScrollSelection: isScrollSelection ?? this.isScrollSelection,
+      selectionMode: selectionMode ?? this.selectionMode,
     );
   }
+
+  bool get isScrollSelection => selectionMode == SelectionMode.scroll;
+  bool get isOcrSelection => selectionMode == SelectionMode.ocr;
+  bool get isQuickSelection => selectionMode != SelectionMode.region;
 }
 
 final class ScrollCapturingWorkflow extends WorkflowState {
@@ -185,7 +191,7 @@ class AppState extends ChangeNotifier {
     IdleWorkflow() => CaptureStatus.idle,
     SettingsWorkflow() => CaptureStatus.idle,
     PreparingCaptureWorkflow() => CaptureStatus.capturing,
-    RegionSelectionWorkflow(isScrollSelection: true) =>
+    RegionSelectionWorkflow(selectionMode: SelectionMode.scroll) =>
       CaptureStatus.scrollSelecting,
     RegionSelectionWorkflow() => CaptureStatus.selecting,
     ScrollCapturingWorkflow() => CaptureStatus.scrollCapturing,
@@ -209,7 +215,24 @@ class AppState extends ChangeNotifier {
         windowRects: windowRects,
         screenSize: screenSize,
         screenOrigin: screenOrigin,
-        isScrollSelection: true,
+        selectionMode: SelectionMode.scroll,
+      ),
+    );
+  }
+
+  void setOcrSelecting({
+    required Image decodedImage,
+    required List<Rect> windowRects,
+    required Size screenSize,
+    required Offset screenOrigin,
+  }) {
+    _transitionTo(
+      RegionSelectionWorkflow(
+        decodedImage: decodedImage,
+        windowRects: windowRects,
+        screenSize: screenSize,
+        screenOrigin: screenOrigin,
+        selectionMode: SelectionMode.ocr,
       ),
     );
   }
@@ -256,7 +279,7 @@ class AppState extends ChangeNotifier {
         windowRects: windowRects,
         screenSize: screenSize,
         screenOrigin: screenOrigin,
-        isScrollSelection: false,
+        selectionMode: SelectionMode.region,
       ),
     );
   }

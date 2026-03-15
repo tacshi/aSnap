@@ -54,14 +54,15 @@ class RegionSelectionScreen extends StatefulWidget {
   final void Function(Rect selectionRect)? onCopy;
   final void Function(Rect selectionRect)? onSave;
   final void Function(Rect selectionRect)? onPin;
+  final void Function(Rect selectionRect)? onOcr;
 
   /// Legacy callback for draw-once selection (scroll capture compatibility).
   final void Function(Rect selectionRect)? onRegionSelected;
 
   /// When true, uses the legacy draw-once behavior: pointer up fires
   /// [onRegionSelected] immediately with no handles or toolbar.
-  /// Used by scroll capture which needs the rect to start capturing.
-  final bool isScrollSelection;
+  /// Used by scroll capture and OCR quick selection.
+  final bool isQuickSelection;
 
   /// Real-time AX hit-test callback. Takes a local point, returns the deepest
   /// accessible element rect in local coordinates (or null).
@@ -80,9 +81,10 @@ class RegionSelectionScreen extends StatefulWidget {
     this.onCopy,
     this.onSave,
     this.onPin,
+    this.onOcr,
     this.onRegionSelected,
     this.onHitTest,
-    this.isScrollSelection = false,
+    this.isQuickSelection = false,
     this.annotationState,
   });
 
@@ -143,6 +145,9 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
 
   @override
   bool get nativeToolbarShowPin => widget.onPin != null;
+
+  @override
+  bool get nativeToolbarShowOcr => widget.onOcr != null;
 
   @override
   void initState() {
@@ -604,7 +609,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
         rect.top < rect.bottom ? rect.bottom : rect.top,
       );
 
-      if (widget.isScrollSelection) {
+      if (widget.isQuickSelection) {
         // Legacy path: fire callback immediately.
         widget.onRegionSelected?.call(normalized);
       } else {
@@ -624,7 +629,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
           : _hitTestElement(clickPos);
 
       if (windowRect != null) {
-        if (widget.isScrollSelection) {
+        if (widget.isQuickSelection) {
           widget.onRegionSelected?.call(windowRect);
         } else {
           setState(() {
@@ -648,7 +653,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     final rect = await widget.onHitTest?.call(localPoint);
     if (!mounted) return;
     if (rect != null) {
-      if (widget.isScrollSelection) {
+      if (widget.isQuickSelection) {
         widget.onRegionSelected?.call(rect);
       } else {
         setState(() {
@@ -843,7 +848,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   // -----------------------------------------------------------------------
 
   bool get _shouldShowToolbar {
-    if (widget.isScrollSelection) return false;
+    if (widget.isQuickSelection) return false;
     if (_selectionRect == null) return false;
     return _phase == _SelectionPhase.selected ||
         _phase == _SelectionPhase.resizing ||
@@ -864,6 +869,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     return computeNativeToolbarSize(
       showPin: widget.onPin != null,
       showHistoryControls: true,
+      showOcr: nativeToolbarShowOcr,
     );
   }
 
@@ -878,6 +884,9 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
         return;
       case 'pin':
         _handleToolbarPin();
+        return;
+      case 'ocr':
+        _handleToolbarOcr();
         return;
       case 'close':
         _handleToolbarClose();
@@ -911,6 +920,11 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     widget.onPin?.call(_selectionRect!);
   }
 
+  void _handleToolbarOcr() {
+    if (_selectionRect == null) return;
+    widget.onOcr?.call(_selectionRect!);
+  }
+
   void _handleToolbarClose() {
     widget.onCancel();
   }
@@ -923,7 +937,7 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
   Widget build(BuildContext context) {
     _scheduleFocusSync();
 
-    final selectionActive = !widget.isScrollSelection && _selectionRect != null;
+    final selectionActive = !widget.isQuickSelection && _selectionRect != null;
     if (widget.windowService.overlaySelectionActive != selectionActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         widget.windowService.overlaySelectionActive = selectionActive;
