@@ -192,6 +192,7 @@ void main() {
           onPin: () => pinned++,
           onDiscard: () => discarded++,
           onOcr: () => ocr++,
+          onCopyText: (_) {},
         ),
       );
 
@@ -294,6 +295,7 @@ void main() {
           onSave: () {},
           onDiscard: () {},
           onOcr: () {},
+          onCopyText: (_) {},
         ),
       );
 

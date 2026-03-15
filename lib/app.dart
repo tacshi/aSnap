@@ -21,6 +21,7 @@ class ASnapApp extends StatelessWidget {
   final VoidCallback? onPin;
   final VoidCallback onDiscard;
   final VoidCallback onOcr;
+  final ValueChanged<String> onCopyText;
   final void Function(Rect selectionRect) onRegionSelected;
   final void Function(Rect selectionRect) onRegionOcr;
 
@@ -49,6 +50,7 @@ class ASnapApp extends StatelessWidget {
     this.onPin,
     required this.onDiscard,
     required this.onOcr,
+    required this.onCopyText,
     required this.onRegionSelected,
     required this.onRegionOcr,
     this.onRegionCopy,
@@ -95,6 +97,7 @@ class ASnapApp extends StatelessWidget {
                 onSave: onRegionSave,
                 onPin: onRegionPin,
                 onOcr: onRegionOcr,
+                onCopyText: onCopyText,
                 onHitTest: onHitTest,
                 annotationState: annotationState,
               );
@@ -151,6 +154,7 @@ class ASnapApp extends StatelessWidget {
                 onSave: onSave,
                 onDiscard: onDiscard,
                 onOcr: onOcr,
+                onCopyText: onCopyText,
               );
             case SettingsWorkflow():
               return SettingsScreen(
@@ -171,6 +175,7 @@ class ASnapApp extends StatelessWidget {
             onPin: onPin,
             onDiscard: onDiscard,
             onOcr: onOcr,
+            onCopyText: onCopyText,
           );
         },
       ),

@@ -11,6 +11,7 @@ import '../state/app_state.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
 import '../widgets/native_toolbar_mixin.dart';
+import '../widgets/qr_code_overlay.dart';
 import '../widgets/tool_popover_mixin.dart';
 
 /// Floating preview window for normal (non-scroll) captures.
@@ -26,6 +27,7 @@ class PreviewScreen extends StatefulWidget {
   final VoidCallback? onPin;
   final VoidCallback onDiscard;
   final VoidCallback onOcr;
+  final ValueChanged<String> onCopyText;
 
   const PreviewScreen({
     super.key,
@@ -37,6 +39,7 @@ class PreviewScreen extends StatefulWidget {
     this.onPin,
     required this.onDiscard,
     required this.onOcr,
+    required this.onCopyText,
   });
 
   @override
@@ -322,6 +325,17 @@ class _PreviewScreenState extends State<PreviewScreen>
                     Positioned.fill(
                       child: DragToMoveArea(child: const SizedBox.expand()),
                     ),
+
+                  QrCodeOverlay(
+                    image: image,
+                    imageDisplayRect: imageDisplayRect,
+                    imagePixelSize: imageSize,
+                    windowService: widget.windowService,
+                    onCopy: widget.onCopyText,
+                    enabled:
+                        activeShapeType == null &&
+                        !widget.annotationState.editingText,
+                  ),
 
                   Positioned(
                     left: popoverAnchorX,

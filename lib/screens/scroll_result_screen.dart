@@ -9,6 +9,7 @@ import '../state/annotation_state.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
 import '../widgets/native_toolbar_mixin.dart';
+import '../widgets/qr_code_overlay.dart';
 import '../widgets/tool_popover_mixin.dart';
 
 /// Fullscreen overlay that displays a scroll capture result.
@@ -24,6 +25,7 @@ class ScrollResultScreen extends StatefulWidget {
   final VoidCallback onSave;
   final VoidCallback onDiscard;
   final VoidCallback onOcr;
+  final ValueChanged<String> onCopyText;
 
   const ScrollResultScreen({
     super.key,
@@ -34,6 +36,7 @@ class ScrollResultScreen extends StatefulWidget {
     required this.onSave,
     required this.onDiscard,
     required this.onOcr,
+    required this.onCopyText,
   });
 
   @override
@@ -361,6 +364,34 @@ class _ScrollResultScreenState extends State<ScrollResultScreen>
                                 );
                               },
                             ),
+                          ),
+                        ),
+
+                        // QR code overlay — rendered above image, disabled while drawing.
+                        Positioned.fill(
+                          child: ListenableBuilder(
+                            listenable: _scrollController,
+                            builder: (context, _) {
+                              final scrollOffset = _scrollController.hasClients
+                                  ? _scrollController.offset
+                                  : 0.0;
+                              final imageDisplayRect = Rect.fromLTWH(
+                                0,
+                                -scrollOffset,
+                                containerRect.width,
+                                scaledImageHeight,
+                              );
+                              return QrCodeOverlay(
+                                image: image,
+                                imageDisplayRect: imageDisplayRect,
+                                imagePixelSize: imagePixelSize,
+                                windowService: widget.windowService,
+                                onCopy: widget.onCopyText,
+                                enabled:
+                                    activeShapeType == null &&
+                                    !widget.annotationState.editingText,
+                              );
+                            },
                           ),
                         ),
                       ],

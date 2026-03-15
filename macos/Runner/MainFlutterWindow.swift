@@ -1277,6 +1277,18 @@ class MainFlutterWindow: NSWindow {
           languages: languages,
           result: result
         )
+      case "detectQRCodes":
+        guard let args = call.arguments as? [String: Any],
+          let typedData = args["pngBytes"] as? FlutterStandardTypedData
+        else {
+          result(
+            FlutterError(
+              code: "INVALID_ARGS",
+              message: "detectQRCodes requires PNG bytes",
+              details: nil))
+          return
+        }
+        self.performQrCodeDetection(pngData: typedData.data, result: result)
 
       // MARK: Pinned image panel
       case "pinImage":
@@ -1951,6 +1963,90 @@ class MainFlutterWindow: NSWindow {
       return languages
     }
     return []
+  }
+
+  // MARK: - QR
+
+  private func performQrCodeDetection(
+    pngData: Data,
+    result: @escaping FlutterResult
+  ) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard
+        let source = CGImageSourceCreateWithData(pngData as CFData, nil),
+        let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
+      else {
+        DispatchQueue.main.async {
+          result(
+            FlutterError(
+              code: "QR_DECODE_FAILED",
+              message: "Unable to decode PNG data for QR detection",
+              details: nil))
+        }
+        return
+      }
+
+      let qrSymbology: VNBarcodeSymbology
+      if #available(macOS 12.0, *) {
+        qrSymbology = .qr
+      } else {
+        qrSymbology = VNBarcodeSymbology(rawValue: "VNBarcodeSymbologyQR")
+      }
+
+      let request = VNDetectBarcodesRequest { request, error in
+        if let error = error {
+          DispatchQueue.main.async {
+            result(
+              FlutterError(
+                code: "QR_FAILED",
+                message: "Vision QR detection failed: \(error.localizedDescription)",
+                details: nil))
+          }
+          return
+        }
+
+        let observations = request.results as? [VNBarcodeObservation] ?? []
+        let payloads = observations.compactMap { observation -> [String: Any]? in
+          guard var payload = observation.payloadStringValue else { return nil }
+          payload = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+          if payload.isEmpty { return nil }
+
+          let rect = VNImageRectForNormalizedRect(
+            observation.boundingBox,
+            cgImage.width,
+            cgImage.height
+          )
+          let topLeftY = CGFloat(cgImage.height) - rect.origin.y - rect.height
+
+          return [
+            "payload": payload,
+            "x": rect.origin.x,
+            "y": topLeftY,
+            "width": rect.width,
+            "height": rect.height,
+          ]
+        }
+
+        DispatchQueue.main.async {
+          result(payloads)
+        }
+      }
+
+      request.symbologies = [qrSymbology]
+
+      let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+      do {
+        try handler.perform([request])
+      } catch {
+        DispatchQueue.main.async {
+          result(
+            FlutterError(
+              code: "QR_FAILED",
+              message: "Vision QR detection failed: \(error.localizedDescription)",
+              details: nil))
+        }
+      }
+    }
   }
 
   // MARK: - Floating toolbar panel

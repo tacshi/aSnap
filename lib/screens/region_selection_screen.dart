@@ -15,6 +15,7 @@ import '../state/annotation_state.dart';
 import '../utils/toolbar_layout.dart';
 import '../widgets/annotation_overlay.dart';
 import '../widgets/native_toolbar_mixin.dart';
+import '../widgets/qr_code_overlay.dart';
 import '../widgets/tool_popover_mixin.dart';
 
 /// Internal phase of the selection interaction.
@@ -71,6 +72,7 @@ class RegionSelectionScreen extends StatefulWidget {
   /// Annotation state for drawing shapes on the selected region.
   final AnnotationState? annotationState;
   final WindowService windowService;
+  final ValueChanged<String>? onCopyText;
 
   const RegionSelectionScreen({
     super.key,
@@ -86,6 +88,7 @@ class RegionSelectionScreen extends StatefulWidget {
     this.onHitTest,
     this.isQuickSelection = false,
     this.annotationState,
+    this.onCopyText,
   });
 
   @override
@@ -947,6 +950,15 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final toolbarRect = _toolbarRect(screenSize);
     final showToolbar = _shouldShowToolbar && toolbarRect != null;
+    final annotationState = widget.annotationState;
+    final showQrOverlay =
+        !widget.isQuickSelection &&
+        _selectionRect != null &&
+        annotationState != null &&
+        widget.onCopyText != null &&
+        _phase == _SelectionPhase.selected &&
+        activeShapeType == null &&
+        !annotationState.editingText;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -1044,6 +1056,25 @@ class _RegionSelectionScreenState extends State<RegionSelectionScreen>
                 child: const SizedBox.expand(),
               ),
             ),
+
+            if (showQrOverlay)
+              Positioned.fill(
+                child: QrCodeOverlay(
+                  image: widget.decodedImage,
+                  imageDisplayRect: _selectionRect!,
+                  imagePixelSize: Size(
+                    _selectionRect!.width * dpr,
+                    _selectionRect!.height * dpr,
+                  ),
+                  imagePixelOrigin: Offset(
+                    _selectionRect!.left * dpr,
+                    _selectionRect!.top * dpr,
+                  ),
+                  windowService: widget.windowService,
+                  onCopy: widget.onCopyText!,
+                  enabled: true,
+                ),
+              ),
 
             if (showToolbar)
               Positioned(

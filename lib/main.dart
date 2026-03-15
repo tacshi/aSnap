@@ -146,6 +146,7 @@ void main() async {
       onPin: _handlePin,
       onDiscard: _handleDiscard,
       onOcr: _handleOcr,
+      onCopyText: _handleCopyText,
       onRegionSelected: _handleRegionSelected,
       onRegionOcr: _handleRegionOcr,
       onRegionCopy: _handleRegionCopy,
@@ -1075,6 +1076,10 @@ Future<void> _handleCopy() async {
   unawaited(_windowService.stopEscMonitor());
   if (wasScrollResult) unawaited(_windowService.cleanupOverlay());
   unawaited(_windowService.startRectPolling());
+}
+
+Future<void> _handleCopyText(String text) async {
+  await _clipboardService.copyText(text);
 }
 
 Future<void> _handleSave() async {

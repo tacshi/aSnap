@@ -45,6 +45,11 @@ Annotate directly on captured screenshots before copying or saving:
 
 Each tool supports customizable color, stroke width, and Undo/Redo (⌘Z / ⌘⇧Z).
 
+### OCR & QR
+
+- **OCR** — Extract text from screenshots and copy it instantly.
+- **QR Codes** — Auto-detect QR codes and click to copy their contents.
+
 ### Quick Actions
 
 - **Copy** — PNG straight to your clipboard

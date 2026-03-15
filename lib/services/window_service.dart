@@ -4,6 +4,8 @@ import 'dart:io' show Platform;
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../models/qr_code.dart';
+
 /// A visible on-screen window detected via CGWindowListCopyWindowInfo.
 class DetectedWindow {
   final Rect rect;
@@ -732,6 +734,29 @@ class WindowService {
       return null;
     } on PlatformException {
       return null;
+    }
+  }
+
+  Future<List<QrCodeResult>> detectQRCodes({
+    required Uint8List pngBytes,
+  }) async {
+    if (!Platform.isMacOS) return const [];
+    try {
+      final result = await _channel.invokeMethod<List>('detectQRCodes', {
+        'pngBytes': pngBytes,
+      });
+      if (result == null || result.isEmpty) return const [];
+      final codes = <QrCodeResult>[];
+      for (final entry in result) {
+        if (entry is! Map) continue;
+        final parsed = QrCodeResult.maybeParse(entry);
+        if (parsed != null) codes.add(parsed);
+      }
+      return codes;
+    } on MissingPluginException {
+      return const [];
+    } on PlatformException {
+      return const [];
     }
   }
 
