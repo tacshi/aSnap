@@ -7,11 +7,17 @@ import '../models/qr_code.dart';
 import '../services/window_service.dart';
 
 class QrCodeOverlay extends StatefulWidget {
+  static Future<Uint8List?> defaultPngBytesLoader(ui.Image image) async {
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
   final ui.Image image;
   final Rect imageDisplayRect;
   final Size imagePixelSize;
   final Offset imagePixelOrigin;
   final WindowService windowService;
+  final Future<Uint8List?> Function(ui.Image image)? pngBytesLoader;
   final ValueChanged<String> onCopy;
   final bool enabled;
 
@@ -22,6 +28,7 @@ class QrCodeOverlay extends StatefulWidget {
     required this.imagePixelSize,
     this.imagePixelOrigin = Offset.zero,
     required this.windowService,
+    this.pngBytesLoader,
     required this.onCopy,
     required this.enabled,
   });
@@ -52,14 +59,17 @@ class _QrCodeOverlayState extends State<QrCodeOverlay> {
     final token = ++_scanToken;
     setState(() => _codes = const []);
 
-    ByteData? byteData;
+    Uint8List? pngBytes;
     try {
-      byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      pngBytes =
+          await (widget.pngBytesLoader ?? QrCodeOverlay.defaultPngBytesLoader)(
+            image,
+          );
     } catch (_) {
       return;
     }
-    final pngBytes = byteData?.buffer.asUint8List();
     if (pngBytes == null) return;
+    if (!mounted || token != _scanToken) return;
 
     final results = await widget.windowService.detectQRCodes(
       pngBytes: pngBytes,
@@ -122,6 +132,8 @@ class _QrCodeHighlight extends StatelessWidget {
   static const _strokeColor = Color(0xFF25D6B3);
   static const _fillColor = Color(0x3325D6B3);
   static const _labelBackground = Color(0xCC0C0C0C);
+  static const _minLabelWidth = 96.0;
+  static const _minLabelHeight = 26.0;
 
   final String payload;
   final ValueChanged<String> onCopy;
@@ -141,33 +153,43 @@ class _QrCodeHighlight extends StatelessWidget {
             border: Border.all(color: _strokeColor, width: 2),
             borderRadius: BorderRadius.circular(4),
           ),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: _labelBackground,
-                  border: Border.all(
-                    color: _strokeColor.withValues(alpha: 0.6),
-                    width: 1,
-                  ),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  child: Text(
-                    'Click to copy',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final showLabel =
+                  constraints.maxWidth >= _minLabelWidth &&
+                  constraints.maxHeight >= _minLabelHeight;
+              if (!showLabel) return const SizedBox.expand();
+              return Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: _labelBackground,
+                      border: Border.all(
+                        color: _strokeColor.withValues(alpha: 0.6),
+                        width: 1,
+                      ),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Text(
+                        'Click to copy',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),

@@ -1990,7 +1990,7 @@ class MainFlutterWindow: NSWindow {
       if #available(macOS 12.0, *) {
         qrSymbology = .qr
       } else {
-        qrSymbology = VNBarcodeSymbology(rawValue: "QR")
+        qrSymbology = VNBarcodeSymbology(rawValue: "VNBarcodeSymbologyQR")
       }
 
       let request = VNDetectBarcodesRequest { request, error in
@@ -2007,7 +2007,6 @@ class MainFlutterWindow: NSWindow {
 
         let observations = request.results as? [VNBarcodeObservation] ?? []
         let payloads = observations.compactMap { observation -> [String: Any]? in
-          if observation.symbology != qrSymbology { return nil }
           guard var payload = observation.payloadStringValue else { return nil }
           payload = payload.trimmingCharacters(in: .whitespacesAndNewlines)
           if payload.isEmpty { return nil }
