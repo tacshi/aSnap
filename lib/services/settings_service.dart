@@ -76,7 +76,10 @@ class SettingsService {
   }
 
   bool _looksLikeLegacyShortcutMap(Map<String, dynamic> map) {
-    return ShortcutAction.values.any(map.containsKey);
+    final actionNames = ShortcutAction.values
+        .map((action) => action.name)
+        .toSet();
+    return map.keys.any(actionNames.contains);
   }
 
   Map<String, dynamic> _normalizeSettingsMap(Map<String, dynamic> map) {

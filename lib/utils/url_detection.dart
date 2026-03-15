@@ -1,31 +1,47 @@
 String? extractFirstUrl(String text) {
   final List<String> candidates = [];
 
-  final schemeMatch = RegExp(
-    r'\bhttps?:\/\/[^\s<>()\[\]{}]+',
-    caseSensitive: false,
-  ).firstMatch(text);
+  String? firstMatch(RegExp pattern, {bool rejectIfPrecededByAt = false}) {
+    for (final match in pattern.allMatches(text)) {
+      final value = match.group(0);
+      if (value == null || value.isEmpty) continue;
+      if (rejectIfPrecededByAt) {
+        final start = match.start;
+        if (start > 0 && text[start - 1] == '@') {
+          continue;
+        }
+      }
+      return value;
+    }
+    return null;
+  }
+
+  final schemeMatch = firstMatch(
+    RegExp(r'\bhttps?:\/\/[^\s<>()\[\]{}]+', caseSensitive: false),
+  );
   if (schemeMatch != null) {
-    candidates.add(schemeMatch.group(0)!);
+    candidates.add(schemeMatch);
   }
 
   if (candidates.isEmpty) {
-    final wwwMatch = RegExp(
-      r'\bwww\.[^\s<>()\[\]{}]+',
-      caseSensitive: false,
-    ).firstMatch(text);
+    final wwwMatch = firstMatch(
+      RegExp(r'\bwww\.[^\s<>()\[\]{}]+', caseSensitive: false),
+    );
     if (wwwMatch != null) {
-      candidates.add(wwwMatch.group(0)!);
+      candidates.add(wwwMatch);
     }
   }
 
   if (candidates.isEmpty) {
-    final domainMatch = RegExp(
-      r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>()\[\]{}]*)?',
-      caseSensitive: false,
-    ).firstMatch(text);
+    final domainMatch = firstMatch(
+      RegExp(
+        r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>()\[\]{}]*)?',
+        caseSensitive: false,
+      ),
+      rejectIfPrecededByAt: true,
+    );
     if (domainMatch != null) {
-      candidates.add(domainMatch.group(0)!);
+      candidates.add(domainMatch);
     }
   }
 

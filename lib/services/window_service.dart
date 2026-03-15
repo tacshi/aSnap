@@ -730,6 +730,8 @@ class WindowService {
       return result;
     } on MissingPluginException {
       return null;
+    } on PlatformException {
+      return null;
     }
   }
 
