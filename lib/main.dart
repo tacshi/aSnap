@@ -41,7 +41,7 @@ Rect? _lastCopiedCgFrame;
 /// Exact PNG bytes written to the clipboard for deferred idle pin validation.
 Uint8List? _lastCopiedClipboardPngBytes;
 
-/// Pre-cached window/element rects from background polling.
+/// Pre-cached window rects from background polling.
 /// Updated every ~2 seconds by the native background thread.
 /// Rects are in global CG coordinates (top-left origin).
 List<DetectedWindow> _cachedGlobalWindows = [];
@@ -209,8 +209,8 @@ Future<void> _initAfterRunApp() async {
     onPin: _handlePin,
   );
 
-  // Start background rect polling — keeps window/element rects ready
-  // so captures are instant (no AX tree walk at trigger time).
+  // Start background rect polling — keeps top-level window rects warm
+  // so captures are instant; element hit-testing stays on-demand.
   await _windowService.startRectPolling();
 }
 

@@ -42,4 +42,32 @@ void main() {
       expect(state.requiresApproval, isFalse);
     },
   );
+
+  test('startRectPolling forwards includeAxChildren false by default', () async {
+    MethodCall? capturedCall;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          capturedCall = call;
+          return null;
+        });
+
+    await windowService.startRectPolling();
+
+    expect(capturedCall?.method, 'startRectPolling');
+    expect(capturedCall?.arguments, {'includeAxChildren': false});
+  });
+
+  test('startRectPolling forwards includeAxChildren true when requested', () async {
+    MethodCall? capturedCall;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          capturedCall = call;
+          return null;
+        });
+
+    await windowService.startRectPolling(includeAxChildren: true);
+
+    expect(capturedCall?.method, 'startRectPolling');
+    expect(capturedCall?.arguments, {'includeAxChildren': true});
+  });
 }
