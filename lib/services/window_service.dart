@@ -80,7 +80,7 @@ class WindowService {
   /// Called when the native scroll-stop button panel is clicked.
   VoidCallback? onScrollCaptureDone;
 
-  /// Called when background rect polling delivers updated window/element rects.
+  /// Called when background rect polling delivers updated window rects.
   /// Rects are in global CG coordinates (top-left origin).
   void Function(List<DetectedWindow> windows)? onRectsUpdated;
 
@@ -430,10 +430,14 @@ class WindowService {
     await _channel.invokeMethod('stopEscMonitor');
   }
 
-  /// Start background polling for window/element rects on a native background
-  /// thread. Results are delivered periodically via [onRectsUpdated].
-  Future<void> startRectPolling() async {
-    await _channel.invokeMethod('startRectPolling');
+  /// Start background polling for window rects on a native background thread.
+  /// Results are delivered periodically via [onRectsUpdated]. By default,
+  /// this only gathers top-level window frames to avoid constant AX tree walks
+  /// while idle.
+  Future<void> startRectPolling({bool includeAxChildren = false}) async {
+    await _channel.invokeMethod('startRectPolling', {
+      'includeAxChildren': includeAxChildren,
+    });
   }
 
   /// Stop background rect polling. Safe to call even if not polling.

@@ -825,7 +825,9 @@ class MainFlutterWindow: NSWindow {
         MainFlutterWindow.log("stopEscMonitor: removed")
         result(nil)
       case "startRectPolling":
-        self.startRectPolling()
+        let includeAxChildren =
+          (call.arguments as? [String: Any])?["includeAxChildren"] as? Bool ?? false
+        self.startRectPolling(includeAxChildren: includeAxChildren)
         result(nil)
       case "stopRectPolling":
         self.stopRectPolling()
@@ -1553,14 +1555,20 @@ class MainFlutterWindow: NSWindow {
 
   // MARK: - Background rect polling
 
-  private func startRectPolling() {
+  /// Poll visible window rects on a timer for instant capture startup.
+  /// When [includeAxChildren] is false, skips the AX tree walk to avoid
+  /// background accessibility churn.
+  private func startRectPolling(includeAxChildren: Bool) {
     stopRectPolling()
     let timer = DispatchSource.makeTimerSource(queue: rectPollingQueue)
     // First poll fires immediately, then every 2 seconds.
     // If the AX walk takes ~1s, this leaves a ~1s idle gap between polls.
     timer.schedule(deadline: .now(), repeating: 2.0, leeway: .milliseconds(500))
     timer.setEventHandler { [weak self] in
-      let rects = MainFlutterWindow.computeWindowRects(promptForAccess: false)
+      let rects = MainFlutterWindow.computeWindowRects(
+        promptForAccess: false,
+        includeAxChildren: includeAxChildren
+      )
       DispatchQueue.main.async {
         self?.flutterChannel?.invokeMethod("onRectsUpdated", arguments: rects)
       }
@@ -1580,10 +1588,14 @@ class MainFlutterWindow: NSWindow {
 
   // MARK: - Window rect computation
 
-  /// Compute all visible window + AX sub-element rects. Thread-safe — callable from any queue.
+  /// Compute visible window rects, optionally including AX sub-element rects.
+  /// Thread-safe — callable from any queue.
   /// When [promptForAccess] is true, shows the Accessibility permission dialog if not trusted.
   /// When false (used by background polling), silently skips the AX walk if not trusted.
-  private static func computeWindowRects(promptForAccess: Bool) -> [[String: Double]] {
+  private static func computeWindowRects(
+    promptForAccess: Bool,
+    includeAxChildren: Bool = true
+  ) -> [[String: Double]] {
     let ownPID = ProcessInfo.processInfo.processIdentifier
     let axTrusted: Bool
     if promptForAccess {
@@ -1622,7 +1634,7 @@ class MainFlutterWindow: NSWindow {
       // Walk AX tree for sub-elements (once per app PID).
       // Depth 20 reaches deep into browser web content (e.g. individual tweets).
       // Cap total rects at 10 000 to bound latency on complex pages.
-      if axTrusted && !walkedPIDs.contains(pid) {
+      if includeAxChildren && axTrusted && !walkedPIDs.contains(pid) {
         walkedPIDs.insert(pid)
         let appElement = AXUIElementCreateApplication(pid)
         var axWindows: CFTypeRef?
