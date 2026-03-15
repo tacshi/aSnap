@@ -13,7 +13,9 @@ class _FakeSettingsService extends SettingsService {
   _FakeSettingsService() : super();
 
   bool failSave = false;
+  bool failOcrSave = false;
   ShortcutBindings? savedShortcuts;
+  bool? savedOcrPreviewEnabled;
 
   @override
   Future<void> saveShortcutBindings(ShortcutBindings bindings) async {
@@ -21,6 +23,14 @@ class _FakeSettingsService extends SettingsService {
       throw Exception('save failed');
     }
     savedShortcuts = bindings;
+  }
+
+  @override
+  Future<void> saveOcrPreviewEnabled(bool enabled) async {
+    if (failOcrSave) {
+      throw Exception('ocr save failed');
+    }
+    savedOcrPreviewEnabled = enabled;
   }
 }
 
@@ -99,6 +109,7 @@ void main() {
     trayService = _FakeTrayService();
     state = SettingsState(
       initialShortcuts: ShortcutBindings.defaults(),
+      initialOcrPreviewEnabled: false,
       settingsService: settingsService,
       windowService: windowService,
       hotkeyService: hotkeyService,
@@ -184,5 +195,22 @@ void main() {
     expect(state.launchAtLoginRequiresApproval, isTrue);
     expect(state.launchAtLoginBusy, isFalse);
     expect(state.launchAtLoginError, isNull);
+  });
+
+  test('setOcrPreviewEnabled persists the setting', () async {
+    await state.setOcrPreviewEnabled(true);
+
+    expect(state.ocrPreviewEnabled, isTrue);
+    expect(settingsService.savedOcrPreviewEnabled, isTrue);
+    expect(state.ocrPreviewError, isNull);
+  });
+
+  test('setOcrPreviewEnabled rolls back on save failure', () async {
+    settingsService.failOcrSave = true;
+
+    await state.setOcrPreviewEnabled(true);
+
+    expect(state.ocrPreviewEnabled, isFalse);
+    expect(state.ocrPreviewError, contains('ocr save failed'));
   });
 }

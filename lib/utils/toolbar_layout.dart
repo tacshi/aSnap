@@ -13,6 +13,7 @@ const double kToolbarGap = 8.0;
 Size computeNativeToolbarSize({
   required bool showPin,
   required bool showHistoryControls,
+  required bool showOcr,
 }) {
   const buttonWidth = 22.0;
   const separatorWidth = 1.0;
@@ -22,6 +23,11 @@ Size computeNativeToolbarSize({
   var viewCount = 9; // drawing tools
   var widthSum = 9 * buttonWidth;
 
+  if (showOcr) {
+    viewCount += 1;
+    widthSum += buttonWidth;
+  }
+
   if (showHistoryControls) {
     viewCount += 3; // separator + undo + redo
     widthSum += separatorWidth + (2 * buttonWidth);
@@ -30,7 +36,10 @@ Size computeNativeToolbarSize({
   viewCount += 1; // separator before action buttons
   widthSum += separatorWidth;
 
-  final actionCount = showPin ? 4 : 3; // copy + save + (optional pin) + close
+  var actionCount = 3; // copy + save + close
+  if (showPin) {
+    actionCount += 1; // optional pin
+  }
   viewCount += actionCount;
   widthSum += actionCount * buttonWidth;
 

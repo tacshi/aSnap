@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 
 class ClipboardService {
@@ -44,5 +45,11 @@ class ClipboardService {
     final clipboardBytes = await readPngImage();
     if (clipboardBytes == null) return false;
     return listEquals(clipboardBytes, expectedPngBytes);
+  }
+
+  Future<bool> copyText(String text) async {
+    if (text.isEmpty) return false;
+    await Clipboard.setData(ClipboardData(text: text));
+    return true;
   }
 }

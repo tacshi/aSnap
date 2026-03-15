@@ -3,7 +3,9 @@ import Carbon
 import Cocoa
 import CoreGraphics
 import FlutterMacOS
+import ImageIO
 import ServiceManagement
+import Vision
 
 class MainFlutterWindow: NSWindow {
   private struct HotKeyChannelError: Error {
@@ -1249,6 +1251,23 @@ class MainFlutterWindow: NSWindow {
           self.showOrUpdateToolbarPanel(args)
         }
         result(nil)
+      case "recognizeText":
+        guard let args = call.arguments as? [String: Any],
+          let typedData = args["pngBytes"] as? FlutterStandardTypedData
+        else {
+          result(
+            FlutterError(
+              code: "INVALID_ARGS",
+              message: "recognizeText requires PNG bytes",
+              details: nil))
+          return
+        }
+        let languages = args["languages"] as? [String]
+        self.performTextRecognition(
+          pngData: typedData.data,
+          languages: languages,
+          result: result
+        )
 
       // MARK: Pinned image panel
       case "pinImage":
@@ -1821,6 +1840,110 @@ class MainFlutterWindow: NSWindow {
     self.acceptsMouseMovedEvents = false
   }
 
+  // MARK: - OCR
+
+  private func performTextRecognition(
+    pngData: Data,
+    languages: [String]?,
+    result: @escaping FlutterResult
+  ) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard
+        let source = CGImageSourceCreateWithData(pngData as CFData, nil),
+        let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
+      else {
+        DispatchQueue.main.async {
+          result(
+            FlutterError(
+              code: "OCR_DECODE_FAILED",
+              message: "Unable to decode PNG data for OCR",
+              details: nil))
+        }
+        return
+      }
+
+      let request = VNRecognizeTextRequest { request, error in
+        if let error = error {
+          DispatchQueue.main.async {
+            result(
+              FlutterError(
+                code: "OCR_FAILED",
+                message: "Vision OCR failed: \(error.localizedDescription)",
+                details: nil))
+          }
+          return
+        }
+
+        let observations = request.results as? [VNRecognizedTextObservation] ?? []
+        let lines = observations.compactMap { observation in
+          observation.topCandidates(1).first?.string
+        }
+        DispatchQueue.main.async {
+          result(lines.joined(separator: "\n"))
+        }
+      }
+
+      request.recognitionLevel = .accurate
+      request.usesLanguageCorrection = true
+
+      let hasLanguageHints = !(languages?.isEmpty ?? true)
+      let useAutoDetect: Bool
+      if #available(macOS 13.0, *) {
+        request.revision = VNRecognizeTextRequestRevision3
+        useAutoDetect = !hasLanguageHints
+        request.automaticallyDetectsLanguage = useAutoDetect
+      } else if #available(macOS 11.0, *) {
+        request.revision = VNRecognizeTextRequestRevision2
+        useAutoDetect = false
+      } else {
+        request.revision = VNRecognizeTextRequestRevision1
+        useAutoDetect = false
+      }
+
+      if hasLanguageHints {
+        request.recognitionLanguages = languages ?? []
+      } else if !useAutoDetect {
+        let supported = self.supportedRecognitionLanguages(for: request)
+        let preferred = Locale.preferredLanguages
+        let filtered = preferred.filter { supported.contains($0) }
+        if !filtered.isEmpty {
+          request.recognitionLanguages = filtered
+        } else if !supported.isEmpty {
+          request.recognitionLanguages = supported
+        }
+      }
+
+      let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+      do {
+        try handler.perform([request])
+      } catch {
+        DispatchQueue.main.async {
+          result(
+            FlutterError(
+              code: "OCR_FAILED",
+              message: "Vision OCR failed: \(error.localizedDescription)",
+              details: nil))
+        }
+      }
+    }
+  }
+
+  private func supportedRecognitionLanguages(for request: VNRecognizeTextRequest) -> [String] {
+    if #available(macOS 12.0, *) {
+      if let languages = try? request.supportedRecognitionLanguages() {
+        return languages
+      }
+    }
+
+    if let languages = try? VNRecognizeTextRequest.supportedRecognitionLanguages(
+      for: request.recognitionLevel,
+      revision: request.revision)
+    {
+      return languages
+    }
+    return []
+  }
+
   // MARK: - Floating toolbar panel
 
   @objc private func toolbarButtonPressed(_ sender: NSButton) {
@@ -1981,6 +2104,7 @@ class MainFlutterWindow: NSWindow {
       return
     }
     guard width > 0, height > 0 else { return }
+    let showOcr = args["showOcr"] as? Bool ?? false
     let activeTool = args["activeTool"] as? String
     let anchorToWindow = args["anchorToWindow"] as? Bool ?? false
 
@@ -2005,6 +2129,7 @@ class MainFlutterWindow: NSWindow {
       showHistoryControls: showHistoryControls,
       canUndo: canUndo,
       canRedo: canRedo,
+      showOcr: showOcr,
       activeTool: activeTool
     )
 
@@ -2141,6 +2266,7 @@ class MainFlutterWindow: NSWindow {
     showHistoryControls: Bool,
     canUndo: Bool,
     canRedo: Bool,
+    showOcr: Bool,
     activeTool: String?
   ) -> (ToolbarRootView, NSSize) {
     for button in self.toolbarButtons.values {
@@ -2192,6 +2318,10 @@ class MainFlutterWindow: NSWindow {
         enabled: true,
         active: activeTool == id
       )
+    }
+
+    if showOcr {
+      addButton(id: "ocr", symbol: "text.viewfinder", tip: "OCR")
     }
 
     if showHistoryControls {

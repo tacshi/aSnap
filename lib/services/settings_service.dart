@@ -14,32 +14,83 @@ class SettingsService {
 
   Future<ShortcutBindings> loadShortcutBindings() async {
     try {
-      final file = await _settingsFile();
-      if (!await file.exists()) {
-        return ShortcutBindings.defaults();
+      final map = await _readSettingsMap();
+      final shortcuts = map['shortcuts'];
+      if (shortcuts is Map<String, dynamic>) {
+        return ShortcutBindings.fromJson(shortcuts);
       }
-
-      final raw = jsonDecode(await file.readAsString());
-      if (raw is! Map<String, dynamic>) {
-        return ShortcutBindings.defaults();
+      if (shortcuts is Map) {
+        return ShortcutBindings.fromJson(Map<String, dynamic>.from(shortcuts));
       }
-
-      return ShortcutBindings.fromJson(raw);
+      if (_looksLikeLegacyShortcutMap(map)) {
+        return ShortcutBindings.fromJson(map);
+      }
+      return ShortcutBindings.defaults();
     } catch (_) {
       return ShortcutBindings.defaults();
     }
   }
 
   Future<void> saveShortcutBindings(ShortcutBindings bindings) async {
-    final file = await _settingsFile();
-    await file.parent.create(recursive: true);
-    await file.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(bindings.toJson()),
-    );
+    final map = await _readSettingsMap();
+    final next = _normalizeSettingsMap(map);
+    next['shortcuts'] = bindings.toJson();
+    await _writeSettingsMap(next);
+  }
+
+  Future<bool> loadOcrPreviewEnabled() async {
+    try {
+      final map = await _readSettingsMap();
+      final value = map['ocrPreviewEnabled'];
+      if (value is bool) return value;
+    } catch (_) {}
+    return false;
+  }
+
+  Future<void> saveOcrPreviewEnabled(bool enabled) async {
+    final map = await _readSettingsMap();
+    final next = _normalizeSettingsMap(map);
+    next['ocrPreviewEnabled'] = enabled;
+    await _writeSettingsMap(next);
   }
 
   Future<File> _settingsFile() async {
     final directory = await _supportDirectoryProvider();
     return File('${directory.path}/settings.json');
+  }
+
+  bool _looksLikeLegacyShortcutMap(Map<String, dynamic> map) {
+    return ShortcutAction.values.any(map.containsKey);
+  }
+
+  Map<String, dynamic> _normalizeSettingsMap(Map<String, dynamic> map) {
+    if (map.containsKey('shortcuts') || map.containsKey('ocrPreviewEnabled')) {
+      return {...map};
+    }
+    if (_looksLikeLegacyShortcutMap(map)) {
+      return {'shortcuts': map};
+    }
+    return {};
+  }
+
+  Future<Map<String, dynamic>> _readSettingsMap() async {
+    final file = await _settingsFile();
+    if (!await file.exists()) {
+      return {};
+    }
+    final raw = jsonDecode(await file.readAsString());
+    if (raw is Map<String, dynamic>) {
+      return raw;
+    }
+    if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+    return {};
+  }
+
+  Future<void> _writeSettingsMap(Map<String, dynamic> map) async {
+    final file = await _settingsFile();
+    await file.parent.create(recursive: true);
+    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(map));
   }
 }

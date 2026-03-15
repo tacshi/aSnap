@@ -40,6 +40,14 @@ HotKey get kPinHotkey => HotKey(
   scope: HotKeyScope.system,
 );
 
+HotKey get kOcrHotkey => HotKey(
+  key: PhysicalKeyboardKey.keyO,
+  modifiers: Platform.isMacOS
+      ? [HotKeyModifier.meta, HotKeyModifier.shift]
+      : [HotKeyModifier.control, HotKeyModifier.shift],
+  scope: HotKeyScope.system,
+);
+
 // Scroll capture tuning constants
 const int kScrollMaxFrames = 150;
 const int kScrollTimeoutSeconds = 30;

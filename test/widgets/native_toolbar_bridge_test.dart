@@ -18,6 +18,7 @@ class _ToolbarShowCall {
   final bool showHistoryControls;
   final bool canUndo;
   final bool canRedo;
+  final bool showOcr;
   final String? activeTool;
   final bool anchorToWindow;
 
@@ -27,6 +28,7 @@ class _ToolbarShowCall {
     required this.showHistoryControls,
     required this.canUndo,
     required this.canRedo,
+    required this.showOcr,
     required this.activeTool,
     required this.anchorToWindow,
   });
@@ -43,6 +45,7 @@ class _FakeWindowService extends WindowService {
     required bool showHistoryControls,
     required bool canUndo,
     required bool canRedo,
+    required bool showOcr,
     String? activeTool,
     bool anchorToWindow = false,
   }) async {
@@ -53,6 +56,7 @@ class _FakeWindowService extends WindowService {
         showHistoryControls: showHistoryControls,
         canUndo: canUndo,
         canRedo: canRedo,
+        showOcr: showOcr,
         activeTool: activeTool,
         anchorToWindow: anchorToWindow,
       ),
@@ -70,12 +74,14 @@ class _RegionSelectionHarness extends StatefulWidget {
   final AnnotationState annotationState;
   final ui.Image image;
   final VoidCallback onCancel;
+  final void Function(Rect selectionRect)? onOcr;
 
   const _RegionSelectionHarness({
     required this.windowService,
     required this.annotationState,
     required this.image,
     required this.onCancel,
+    this.onOcr,
   });
 
   @override
@@ -100,6 +106,7 @@ class _RegionSelectionHarnessState extends State<_RegionSelectionHarness> {
                 windowService: widget.windowService,
                 onCopy: (_) {},
                 onSave: (_) {},
+                onOcr: widget.onOcr,
                 annotationState: widget.annotationState,
               )
             : const SizedBox.shrink(),
@@ -167,6 +174,7 @@ void main() {
       var saved = 0;
       var pinned = 0;
       var discarded = 0;
+      var ocr = 0;
 
       addTearDown(() {
         appState.clear();
@@ -183,6 +191,7 @@ void main() {
           onSave: () => saved++,
           onPin: () => pinned++,
           onDiscard: () => discarded++,
+          onOcr: () => ocr++,
         ),
       );
 
@@ -190,16 +199,19 @@ void main() {
       expect(windowService.showCalls, isNotEmpty);
       expect(windowService.showCalls.last.showPin, isTrue);
       expect(windowService.showCalls.last.showHistoryControls, isTrue);
+      expect(windowService.showCalls.last.showOcr, isTrue);
       expect(windowService.showCalls.last.anchorToWindow, isTrue);
 
       windowService.onToolbarAction!.call('copy');
       windowService.onToolbarAction!.call('save');
       windowService.onToolbarAction!.call('pin');
+      windowService.onToolbarAction!.call('ocr');
       windowService.onToolbarAction!.call('close');
 
       expect(copied, 1);
       expect(saved, 1);
       expect(pinned, 1);
+      expect(ocr, 1);
       expect(discarded, 1);
 
       windowService.onToolbarAction!.call('ellipse');
@@ -219,6 +231,7 @@ void main() {
       final annotationState = AnnotationState();
       final windowService = _FakeWindowService();
       var cancelCount = 0;
+      var ocrCount = 0;
 
       addTearDown(annotationState.clear);
       addTearDown(image.dispose);
@@ -229,6 +242,7 @@ void main() {
           annotationState: annotationState,
           image: image,
           onCancel: () => cancelCount++,
+          onOcr: (_) => ocrCount++,
         ),
       );
       await tester.pump();
@@ -244,6 +258,10 @@ void main() {
       expect(windowService.showCalls, isNotEmpty);
       expect(windowService.showCalls.last.showPin, isFalse);
       expect(windowService.showCalls.last.showHistoryControls, isTrue);
+      expect(windowService.showCalls.last.showOcr, isTrue);
+
+      windowService.onToolbarAction!.call('ocr');
+      expect(ocrCount, 1);
 
       windowService.onToolbarAction!.call('close');
       await tester.pump();
@@ -275,12 +293,14 @@ void main() {
           onCopy: () {},
           onSave: () {},
           onDiscard: () {},
+          onOcr: () {},
         ),
       );
 
       expect(windowService.showCalls, isNotEmpty);
       expect(windowService.showCalls.last.showPin, isFalse);
       expect(windowService.showCalls.last.showHistoryControls, isTrue);
+      expect(windowService.showCalls.last.showOcr, isTrue);
 
       windowService.onToolbarAction!.call('text');
       await tester.pump();

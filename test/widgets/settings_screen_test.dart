@@ -17,10 +17,16 @@ class _FakeSettingsService extends SettingsService {
   _FakeSettingsService() : super();
 
   ShortcutBindings? savedShortcuts;
+  bool? savedOcrPreviewEnabled;
 
   @override
   Future<void> saveShortcutBindings(ShortcutBindings bindings) async {
     savedShortcuts = bindings;
+  }
+
+  @override
+  Future<void> saveOcrPreviewEnabled(bool enabled) async {
+    savedOcrPreviewEnabled = enabled;
   }
 }
 
@@ -82,6 +88,7 @@ Future<_SettingsHarness> _pumpSettingsScreen(
   final trayService = _FakeTrayService();
   final state = SettingsState(
     initialShortcuts: initialShortcuts ?? ShortcutBindings.defaults(),
+    initialOcrPreviewEnabled: false,
     settingsService: settingsService,
     windowService: _FakeWindowService(),
     hotkeyService: hotkeyService,
@@ -133,10 +140,12 @@ void main() {
     expect(find.text('General'), findsOneWidget);
     expect(find.text('Shortcuts'), findsOneWidget);
     expect(find.text('Launch at login'), findsOneWidget);
+    expect(find.text('Show OCR preview'), findsOneWidget);
     expect(find.text('Region'), findsOneWidget);
     expect(find.text('Scroll'), findsOneWidget);
     expect(find.text('Full Screen'), findsOneWidget);
     expect(find.text('Pin'), findsOneWidget);
+    expect(find.text('OCR'), findsOneWidget);
     expect(find.text('Save changes'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -146,7 +155,7 @@ void main() {
   ) async {
     await _pumpSettingsScreen(tester);
 
-    expect(find.byType(OutlinedButton), findsNWidgets(4));
+    expect(find.byType(OutlinedButton), findsNWidgets(5));
     expect(tester.takeException(), isNull);
   });
 

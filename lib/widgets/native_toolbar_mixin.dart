@@ -19,6 +19,7 @@ mixin NativeToolbarMixin<T extends StatefulWidget>
   bool _lastShowHistoryControls = false;
   bool _lastCanUndo = false;
   bool _lastCanRedo = false;
+  bool _lastShowOcr = false;
   String? _lastActiveTool;
 
   late final void Function(String) _toolbarActionHandler =
@@ -33,6 +34,8 @@ mixin NativeToolbarMixin<T extends StatefulWidget>
   bool get nativeToolbarShowHistoryControls => true;
 
   bool get nativeToolbarAnchorToWindow => false;
+
+  bool get nativeToolbarShowOcr => false;
 
   void handleNativeToolbarAction(String action);
 
@@ -57,6 +60,7 @@ mixin NativeToolbarMixin<T extends StatefulWidget>
     _lastShowHistoryControls = false;
     _lastCanUndo = false;
     _lastCanRedo = false;
+    _lastShowOcr = false;
     _lastActiveTool = null;
   }
 
@@ -85,6 +89,7 @@ mixin NativeToolbarMixin<T extends StatefulWidget>
         _lastShowHistoryControls == showHistoryControls &&
         _lastCanUndo == canUndo &&
         _lastCanRedo == canRedo &&
+        _lastShowOcr == nativeToolbarShowOcr &&
         _lastActiveTool == activeTool) {
       return;
     }
@@ -94,6 +99,7 @@ mixin NativeToolbarMixin<T extends StatefulWidget>
     _lastShowHistoryControls = showHistoryControls;
     _lastCanUndo = canUndo;
     _lastCanRedo = canRedo;
+    _lastShowOcr = nativeToolbarShowOcr;
     _lastActiveTool = activeTool;
 
     unawaited(
@@ -103,6 +109,7 @@ mixin NativeToolbarMixin<T extends StatefulWidget>
         showHistoryControls: showHistoryControls,
         canUndo: canUndo,
         canRedo: canRedo,
+        showOcr: nativeToolbarShowOcr,
         activeTool: activeTool,
         anchorToWindow: nativeToolbarAnchorToWindow,
       ),

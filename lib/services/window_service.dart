@@ -674,6 +674,7 @@ class WindowService {
     required bool showHistoryControls,
     required bool canUndo,
     required bool canRedo,
+    required bool showOcr,
     String? activeTool,
     bool anchorToWindow = false,
   }) async {
@@ -689,6 +690,7 @@ class WindowService {
         'showHistoryControls': showHistoryControls,
         'canUndo': canUndo,
         'canRedo': canRedo,
+        'showOcr': showOcr,
         'activeTool': activeTool,
         'anchorToWindow': anchorToWindow,
         'requestId': requestId,
@@ -712,6 +714,22 @@ class WindowService {
     } on MissingPluginException {
       // Non-macOS runners may not provide this channel implementation.
       return;
+    }
+  }
+
+  Future<String?> recognizeText({
+    required Uint8List pngBytes,
+    List<String>? languages,
+  }) async {
+    if (!Platform.isMacOS) return null;
+    try {
+      final result = await _channel.invokeMethod<String>('recognizeText', {
+        'pngBytes': pngBytes,
+        if (languages != null && languages.isNotEmpty) 'languages': languages,
+      });
+      return result;
+    } on MissingPluginException {
+      return null;
     }
   }
 
